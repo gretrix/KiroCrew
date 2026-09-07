@@ -2156,19 +2156,44 @@ export function rehypeSanitize() {
   }
 }
 
-/** A whole mdast `html` node that is exactly ONE tag: `<x>`, `</x>`, `<x a b>`,
- * `<x/>`. Attribute values are quote-aware, so a value may itself contain `>`
- * (`<x a="b>c">`); without that, such a tag misses this test and falls to the
- * lossy escapedNodeTree() path. A bare attribute may hold `/` (`<x a/b>`) so
- * this accepts everything the previous blanket `[^>]*` did. The leading
- * `[a-zA-Z]` excludes comments (`<!-- -->`) and doctypes, which keep their
- * existing handling. */
-const SINGLE_TAG_RE =
-  /^<\/?([a-zA-Z][a-zA-Z0-9-]*)((?:\s+[^\s=>]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]*))?)*)\s*\/?>$/
-
-/** Tag name of a single-tag html node, or undefined when it is not one. */
+/** Recognize one whole tag without backtracking over attacker-authored HTML.
+ * The fixed states preserve ambiguous empty/unquoted values and bare attributes
+ * while allowing `>` inside quotes. Each input character advances every active
+ * state once; comments, doctypes and multi-tag blocks keep their existing path. */
 function singleTagName(value: string): string | undefined {
-  return SINGLE_TAG_RE.exec(value)?.[1]?.toLowerCase()
+  if (value[0] !== '<') return undefined
+  let index = value[1] === '/' ? 2 : 1
+  const nameStart = index
+  if (index >= value.length || !/[a-zA-Z]/.test(value[index])) return undefined
+  while (index < value.length && /[a-zA-Z0-9-]/.test(value[index])) index++
+  const tag = value.slice(nameStart, index).toLowerCase()
+
+  const boundary = 1, gap = 2, name = 4, nameGap = 8, valueStart = 16
+  const bare = 32, singleQuoted = 64, doubleQuoted = 128, slash = 256
+  let states = boundary
+  for (; index < value.length && states; index++) {
+    const char = value[index]
+    if (char === '>' && index === value.length - 1
+      && (states & (boundary | gap | name | nameGap | valueStart | bare | slash))) return tag
+
+    let next = 0
+    if (states & singleQuoted) next |= char === "'" ? boundary : singleQuoted
+    if (states & doubleQuoted) next |= char === '"' ? boundary : doubleQuoted
+    if (/\s/.test(char)) {
+      if (states & (boundary | gap | name | nameGap | valueStart | bare)) next |= gap
+      if (states & (name | nameGap)) next |= nameGap
+      if (states & valueStart) next |= valueStart
+    } else if (char !== '>') {
+      if (char !== '=' && (states & (gap | name | nameGap))) next |= name
+      if (char === '=' && (states & (name | nameGap))) next |= valueStart
+      if (states & (valueStart | bare)) next |= bare
+      if (char === '"' && (states & valueStart)) next |= doubleQuoted
+      if (char === "'" && (states & valueStart)) next |= singleQuoted
+      if (char === '/' && (states & boundary)) next |= slash
+    }
+    states = next
+  }
+  return undefined
 }
 
 /** Showable verbatim. Executable tags keep their `[unsupported: x]` marker; every

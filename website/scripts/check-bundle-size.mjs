@@ -83,10 +83,13 @@ export const CHUNK_BUDGETS = {
   // stays green, so the ceiling moves back to the 5% convention.
   // The structured-monitor dashboard adds 57 English keys, a measured 2.7 KB
   // increase over main's 776.5 KB runtime chunk. That is expected catalog
-  // growth, not a new library reaching the runtime. Keep roughly 5% headroom,
-  // matching the `all` entry's convention above, so ordinary translated UI
-  // additions do not make this gate block unrelated descendants.
-  t: 819 * KB, // measured 779.2 KB with structured-monitor catalog additions
+  // growth, not a new library reaching the runtime.
+  // The V1/V2 memory editor, ownership, conflict-review and recovery copy
+  // added 11,929 B against the earlier e7db5f5b8 base: the pre-integration
+  // chunk was 804,764 B (785.9 KB), with the same 12-module runtime/catalog
+  // graph. English stays synchronous by the i18n owner contract. Retain the
+  // memory ceiling here; CI measures the bundle after integration with main.
+  t: 826 * KB, // pre-integration memory measurement: 785.9 KB (~5% headroom)
 
   // Pierre editor implementation (PR #4072 replaced Monaco, whose
   // 'editor.api2' chunk this entry set used to carry) -- the code-editor

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from 'vitest'
+import { describe, it, expect, afterEach, vi } from 'vitest'
 import { render } from '@testing-library/react'
 import { unified } from 'unified'
 import remarkParse from 'remark-parse'
@@ -272,6 +272,52 @@ describe('remarkVerbatimUnknownTags as a shared unit', () => {
     const kids = run('a <Widget-id> b')
     expect(kids.some(k => k.type === 'html')).toBe(false)
     expect(kids.some(k => k.type === 'text' && k.value === '<Widget-id>')).toBe(true)
+  })
+
+  it.each([
+    '<Widget-id>', '</Widget-id>', '<Widget-id/>', '<Widget-id a/b>',
+    '<Widget-id a="b>c">', "<Widget-id a='b>c'>", '<Widget-id a=>',
+    '<Widget-id a="b"suffix>', '<Widget-id a="a b" = "c">',
+    '<Widget-id a= b=">">', '<Widget-id a="unterminated>',
+  ])('preserves the existing single-tag interpretation of %s', value => {
+    // Direct raw nodes exercise the shared pass's permissive attribute grammar,
+    // including forms an inline markdown tokenizer may leave as plain text.
+    const node = { type: 'html', value }
+    remarkVerbatimUnknownTags()({ type: 'root', children: [node] })
+    expect(node).toEqual({ type: 'text', value })
+  })
+
+  it.each([
+    '<Widget-id><Other>', '<Widget-id a="b>c>', '<Widget-id a="b">tail',
+    '<Widget-id/ >', '<1Widget>', '<!-- note -->', '<!DOCTYPE html>',
+  ])('leaves non-single-tag input on its existing HTML path: %s', value => {
+    const node = { type: 'html', value }
+    remarkVerbatimUnknownTags()({ type: 'root', children: [node] })
+    expect(node).toEqual({ type: 'html', value })
+  })
+
+  it.each(['malformed block', 'large quoted placeholder'] as const)('does not dispatch a %s to a whole-node regex', kind => {
+    // The scanner sees raw block tags even when invalid attributes prevent an
+    // inline HTML token. Establish that parser boundary before guarding the
+    // pass, so a reintroduced regex fails here rather than wedging a CI worker.
+    const value = kind === 'malformed block'
+      ? '<div\t!=' + '\t\t!='.repeat(512)
+      : '<Widget-id a="' + 'word '.repeat(512) + '">'
+    const tree = unified().use(remarkParse).parse(value)
+    expect(tree.children).toHaveLength(1)
+    const node = tree.children[0]
+    expect(node).toMatchObject({ type: 'html', value })
+    const originalExec = RegExp.prototype.exec
+    const exec = vi.spyOn(RegExp.prototype, 'exec').mockImplementation(function (this: RegExp, input) {
+      if (input === value) throw new Error('Raw HTML node reached a whole-node regex')
+      return originalExec.call(this, input)
+    })
+    try {
+      remarkVerbatimUnknownTags()(tree)
+    } finally {
+      exec.mockRestore()
+    }
+    expect(node).toMatchObject({ type: kind === 'malformed block' ? 'html' : 'text', value })
   })
 
   it('converts a tag carrying a dangerous attribute value to a text node', () => {
