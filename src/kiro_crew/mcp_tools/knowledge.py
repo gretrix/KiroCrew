@@ -86,9 +86,13 @@ def schemas() -> list[dict[str, Any]]:
         {
             "name": "knowledge_list_sources",
             "description": (
-                "List the knowledge library's sources as 'name — id (N items)' "
-                "lines. Use it to discover a valid source_id before scoping "
-                "local_knowledge_search to a single source."
+                "Read-only counts for the user's knowledge library: how many "
+                "sources, documents and items it holds in total, then one "
+                "'name — id (N items)' line per source. Use it to answer 'how "
+                "much is in my knowledge base', and to discover a valid "
+                "source_id before scoping local_knowledge_search to a single "
+                "source. It only counts -- it never rebuilds, repairs or "
+                "flushes anything."
             ),
             "inputSchema": {
                 "type": "object",
@@ -436,18 +440,47 @@ def knowledge_list_sources(name: str, args: dict[str, Any]) -> str:
         "  OR i.id IN (SELECT sl.item_id FROM source_locations sl WHERE sl.source_id = s.id)"
         ") GROUP BY s.id, s.name ORDER BY s.name"
     ).fetchall()
+    stats = store.aggregate_stats()
     mcp_core.sel().log_tool_invocation(
         session_key=mcp_core._resolve_session_key(),
         source="mcp",
         tool_name="knowledge_list_sources",
         outcome="success",
-        metadata={"source_count": len(rows)},
+        metadata={
+            "source_count": len(rows),
+            "documents": stats.documents,
+            "items": stats.items,
+        },
+    )
+    totals = (
+        f"Knowledge library: {stats.sources} source(s), "
+        f"{stats.documents} document(s), {stats.items} item(s)."
     )
     if not rows:
-        return "The knowledge library has no sources yet."
-    lines = [f"Knowledge sources ({len(rows)}):"]
+        return f"{totals}\nThe knowledge library has no sources yet."
+    lines = [totals, f"Sources ({len(rows)}):"]
     for row in rows:
         lines.append(f"- {row['name']} — id: {row['id']} ({row['item_count']} item(s))")
+    # The lines and the total answer different questions, so each gap between
+    # them is named WITH its count rather than left for the reader to guess at.
+    # A per-source count is scope membership -- what a search scoped to that
+    # source_id reaches: ownership OR location -- so an item located under one
+    # source but owned by another is on two lines. The total counts each item
+    # once, and an item owned by no registered source is in it but on no line.
+    # Each caveat is spent only when this library is actually in that state.
+    unowned = sum(s.items for s in stats.per_source if s.source_id is None)
+    if unowned:
+        lines.append(
+            f"{unowned} item(s) are owned by no registered source: the total counts "
+            "them, the lines above do not, and no source_id scope reaches them."
+        )
+    shared = sum(int(row["item_count"]) for row in rows) - (stats.items - unowned)
+    if shared > 0:
+        lines.append(
+            f"The lines above count {shared} more membership(s) than the items they "
+            "own: an item surviving a cross-source dedup collapse stays in both "
+            "sources' search scope and is counted on each of their lines."
+        )
     output = "\n".join(lines)
     output, _ = redact_exfiltration_urls(output)
     output, _ = redact_credentials(output)
