@@ -51,7 +51,12 @@ import { performAgentSlotSwitch } from '../lib/agentSwitch'
 import { api } from '../api/client'
 import { resolveAskAfterSend } from '../lib/resolveAskAfterSend'
 import { classifyDrop } from '../utils/dropClassify'
-import { prepareSendPayload, serializeDirTokens, spliceDirTokens, VIDEO_EXT } from '../utils/fileTokens'
+import { addPendingFile, buildRelMap, normalizeWindowsPath, parseDirTokens, prepareSendPayload, serializeDirTokens, spliceDirTokens, VIDEO_EXT } from '../utils/fileTokens'
+import { type PasteBlock, expandAll as expandPasteTokens, pruneBlocks as pruneBlocksUtil, remapCarriedBlocks, saveStoredPaste } from '../utils/pasteTokens'
+import { useComposerVoice, composerVoiceInputProps } from '../chat-core/composer/useComposerVoice'
+import VoiceDisabledModal from './VoiceDisabledModal'
+import { settingsPath } from './settingsPath'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { displayModel } from '../lib/model'
 
 
@@ -126,7 +131,24 @@ export default function ChatPane({
   // while the card that owns that flow is reachable.
   const connectionsUiOn = useConnectionsUiEnabled()
   const [input, setInput] = useState('')
+  // Fresh every render: dictation reads the live composer through it (splice at
+  // the caret, verify a dictated region before removing it) without re-creating
+  // its callbacks on every keystroke.
+  const inputRef = useRef(input); inputRef.current = input
   const [pendingFiles, setPendingFiles] = useState<string[]>([])
+  // Collapsed long-text pastes backing the `⌜🗒 Pasted #N⌟` tokens in `input`.
+  // Expanded for the wire in doSend; the bubble keeps the tokens as chips. Same
+  // shape as ChatPage (P3-b parity); a pane has no per-slot draft store, so
+  // there is no pasteDrafts persistence here.
+  const [pasteBlocks, setPasteBlocks] = useState<PasteBlock[]>([])
+  const pasteBlocksRef = useRef(pasteBlocks); pasteBlocksRef.current = pasteBlocks
+  // Folder references derive from the `@rel/` tokens the @-mention picker
+  // inserts — the token IS the state, so the chip strip reads it from the text.
+  const pendingDirs = useMemo(() => parseDirTokens(input).map(t => t.rel), [input])
+  // Exact composer token a picker pick inserted, keyed by the staged file path,
+  // so removing the chip strips precisely that token (ChatPage contract).
+  const pickedFileTokens = useRef<Record<string, string>>({})
+  const isMobile = useIsMobile()
   const [uploadError, setUploadError] = useState('')
   // In-pane report of a per-slot setting write (agent / model switch) that did
   // not persist — the shared toast is transient feedback, not the error surface.
@@ -169,6 +191,21 @@ export default function ChatPane({
   // has_more freezes at mount while a later bounded warm can truncate the cache.
   const warmHasMore = useAppSelector((s) => s.chat.slotPaneHasMore?.[slotKey])
   const paneSlot = useAppSelector((s) => s.dashboard.slots.find((x) => x.key === slotKey))
+  // Voice dictation — the same chat-core hook ChatPage runs (P3-b). The pane's
+  // composer IS its slot's, so the default on-screen predicate
+  // (`target === slotKey`) is exact and no off-screen delivery is supplied: a
+  // batch transcript for a pane that has since unmounted is claimed by whichever
+  // composer shows that slot, or dropped. No push-to-talk here: the key binding
+  // is document-wide and ChatPage owns it; N panes each armed would open N
+  // captures on one keystroke (follow-up: focused-pane ownership).
+  const doSendRef = useRef<((optionText?: string) => void) | null>(null)
+  const composerVoice = useComposerVoice({
+    sessionId: slotKey,
+    inputRef,
+    setInput,
+    onAutoSubmit: useCallback(() => { doSendRef.current?.() }, []),
+  })
+  const { disarmForSend } = composerVoice
   // Shared composer-busy rule (chatSlice.selectComposerBusy): main turn
   // streaming OR sub-agents running (dual signal). Drives the queue affordance
   // and skips the optimistic user bubble (the backend returns a "queued"
@@ -496,8 +533,24 @@ export default function ChatPane({
    *  in the app, this pane's two included (a failed `doSend` and a failed
    *  question-card fallback); attachments merge here as a set union so a file
    *  re-picked mid-flight is not double-attached. */
-  const restoreIntoComposer = useCallback((text: string, files: string[] = []) => {
-    setInput(prev => mergeRecoveredDraft(prev, text))
+  const restoreIntoComposer = useCallback((text: string, files: string[] = [], pastes: PasteBlock[] = []) => {
+    if (!pastes.length) {
+      setInput(prev => mergeRecoveredDraft(prev, text))
+    } else {
+      // Collapsed pastes resolve by `seq`, and a paste made while the send was in
+      // flight restarts numbering — so re-sequence the carried blocks past the
+      // ones now staged and rewrite their markers in the restored text (the same
+      // remap ChatPage performs), or two chips could share #1.
+      const keep = pasteBlocksRef.current
+      const keptIds = new Set(keep.map(b => b.id))
+      const { text: payload, blocks: carried } = remapCarriedBlocks(
+        text,
+        pastes.filter(b => !keptIds.has(b.id)),
+        new Set(keep.map(b => b.seq)),
+      )
+      setPasteBlocks([...keep, ...carried])
+      setInput(prev => mergeRecoveredDraft(prev, payload))
+    }
     if (files.length) setPendingFiles(prev => [...prev, ...files.filter(f => !prev.includes(f))])
   }, [])
 
@@ -535,6 +588,9 @@ export default function ChatPane({
     // text exactly as ChatPage does with `optionText || inputRef.current`.
     const text = (optionText || input).trim()
     if (!text && !pendingFiles.length) return
+    // A send while STREAMING dictation is live ends the dictation, before the
+    // composer is read and cleared (see useComposerVoice.disarmForSend).
+    disarmForSend()
     // Capture the stateless card pending at ENTRY (before any state updates
     // or yields): this send consumes the answer channel of the card the user
     // saw when they hit send. Retired only after the server confirms it
@@ -553,9 +609,14 @@ export default function ChatPane({
     // loss). Consuming the draft or attachments here would wipe text the user
     // never sent and attach files to a message they never composed.
     const files = optionText ? [] : pendingFiles
+    // Collapsed pastes belong to the composer too: an option send neither
+    // expands nor clears them.
+    const activePastes = optionText ? [] : pasteBlocksRef.current
     if (!optionText) {
       setInput('')
       setPendingFiles([])
+      setPasteBlocks([])
+      pickedFileTokens.current = {}
     }
     // Attachments take the SAME wire/bubble serialization as ChatPage
     // (prepareSendPayload, the single owner of attachment-marker knowledge):
@@ -576,7 +637,13 @@ export default function ChatPane({
     // marker N to dirPaths[N-1] for lossless history replay. The pane has no
     // project context, so tokens are absolute and serialize as-is. Runs AFTER
     // the file pass: file tokens never end in `/`, so the rewrites are disjoint.
-    const { llm, dirPaths } = serializeDirTokens(txt, '')
+    const { llm: llmDirs, dirPaths } = serializeDirTokens(txt, paneSlot?.project || '')
+    // Expand paste tokens for the LLM; the bubble keeps the tokens intact so the
+    // user row renders them as clickable chips, and the tokenization is stored
+    // so those chips survive a refresh — the same split ChatPage makes.
+    const llm = activePastes.length ? expandPasteTokens(llmDirs, activePastes) : llmDirs
+    const bubblePastes = pruneBlocksUtil(displayTxt, activePastes)
+    if (bubblePastes.length) saveStoredPaste(llm, displayTxt, bubblePastes, filePaths)
     // sendId correlation (same contract as ChatPage): the wire text differs
     // from the bubble text whenever a folder token serialized, so the store's
     // content-equality fallback can never reconcile the server echo against
@@ -608,7 +675,7 @@ export default function ChatPane({
       // consumed the draft (see the `!optionText` gate above), so restoring the
       // option label here would CLOBBER the preserved draft with text the user
       // can re-click any time.
-      if (!optionText) restoreIntoComposer(text, files)
+      if (!optionText) restoreIntoComposer(text, files, activePastes)
     }
     // Receipt semantics live in the chat-core transport (sendTurn owns the
     // abort deadline and the shared readSendReceipt classification). This
@@ -654,7 +721,10 @@ export default function ChatPane({
       if (receipt.status === 'dispatched' && cardAtSend) dispatch(retireStatelessQuestion({ slot: slotKey, expected: cardAtSend }))
       void resolveAskAfterSend(receipt.body, askAtSend, dispatch)
     })
-  }, [input, pendingFiles, busy, slotKey, dispatch, restoreIntoComposer, reportSendFailure])
+  }, [input, pendingFiles, busy, slotKey, dispatch, restoreIntoComposer, reportSendFailure, paneSlot?.project, disarmForSend])
+  // The endpointer auto-submit (wired into the voice hook above doSend) reads the
+  // latest send through this ref.
+  doSendRef.current = doSend
 
   // Stop mirrors ChatPage's press protocol (ChatPage.onStop): the first press
   // is the cooperative cancel, a second press while the slot reports
@@ -1163,14 +1233,62 @@ export default function ChatPane({
           project={paneSlot?.project ?? ''}
           onUploadFiles={uploadFiles}
           pendingFiles={pendingFiles}
-          onRemoveFile={(p) => setPendingFiles((prev) => prev.filter((x) => x !== p))}
+          pendingDirs={pendingDirs}
+          onRemoveFile={(p) => {
+            setPendingFiles((prev) => prev.filter((x) => x !== p))
+            // A picker-picked file also inserted an `@rel` token into the
+            // composer, so its remove strips that token too — the same contract
+            // folder chips have (ChatPage). The exact token is recorded at pick
+            // time; a file staged another way (upload, drop, failed-send restore)
+            // has none, so derive it from the path — the shortest boundary-checked
+            // `@suffix` present in the text — and on no match leave the text alone.
+            const token = pickedFileTokens.current[p] ?? [...buildRelMap([p], inputRef.current).keys()].map(s => `@${s}`)[0]
+            delete pickedFileTokens.current[p]
+            if (!token) return
+            const esc = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            setInput(prev => prev.replace(new RegExp(`(^|\\s)${esc}(?: |(?=\\s)|$)`, 'g'), '$1'))
+          }}
+          onRemoveDir={(rel) => {
+            // The chip derives from the `@rel/` token, so removing the reference
+            // IS removing the token. Boundary-checked so "@src/pages/" never eats
+            // a longer "@src/pages/sub/" token.
+            const esc = `@${rel}`.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+            setInput(prev => prev.replace(new RegExp(`(^|\\s)${esc}(?: |(?=\\s)|$)`, 'g'), '$1'))
+          }}
+          // The @-mention picker renders only when this is supplied (P3-b). A
+          // folder pick is complete once ChatInput inserts its `@rel/` token —
+          // the chip derives from the text. Files stay list-backed and record
+          // their inserted token for remove. Staged under the canonical
+          // (forward-slash Windows) identity so the same file picked twice
+          // dedupes instead of sending twice.
+          onFileSelect={(path, kind, token) => {
+            if (kind === 'dir') return
+            const canon = normalizeWindowsPath(path)
+            if (token) pickedFileTokens.current[canon] = token
+            setPendingFiles(prev => addPendingFile(prev, canon))
+          }}
+          pasteBlocks={pasteBlocks}
+          onPasteBlocksChange={setPasteBlocks}
+          sendOnEnter={isMobile ? 'ctrl-enter' : chatConfig.sendOnEnter}
           uploading={uploadMutation.isPending}
           onDrop={dropTargetProps.onDrop}
           onDragOver={dropTargetProps.onDragOver}
           onDragLeave={dropTargetProps.onDragLeave}
+          /* Voice: the same prop set ChatPage spreads, built once in chat-core. */
+          {...composerVoiceInputProps(composerVoice)}
         />
         </div>
         </div>
+        <VoiceDisabledModal
+          open={composerVoice.setup.open}
+          reason={composerVoice.setup.reason}
+          provider={composerVoice.setup.provider}
+          onClose={() => composerVoice.setup.setOpen(false)}
+          onOpenSettings={() => {
+            composerVoice.setup.setOpen(false)
+            navigate(settingsPath({ tab: 'voice' }))
+          }}
+        />
 
         {/* Agent picker portal — anchored to the input-bar agent button. */}
         {agentDD.open && agentBtnRect && createPortal(

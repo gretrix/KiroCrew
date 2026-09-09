@@ -6,8 +6,8 @@
  * request is still in flight. The request is a plain fetch, so it completes
  * regardless — only its DELIVERY needs somewhere to land, because the callback
  * it was going to invoke belongs to a page that no longer exists. Progress and
- * results are routed here instead: to the hook instance that is mounted at the
- * time if there is one, otherwise held until the next instance subscribes.
+ * results are routed here instead: to the hook instances that are mounted at the
+ * time if there are any, otherwise held until the next instance subscribes.
  * That is what carries a transcript across a trip to Settings.
  *
  * Every request carries an id, and a subscriber is told when one BEGINS as well
@@ -20,14 +20,20 @@
  * never leaves a recording running without any UI to see or stop it. Only the
  * pending request lives here, and only until the tab unloads.
  *
- * Two invariants, both resting on the same fact — the controls that start a voice
- * session live only in Chat, and the caller refuses to start one while a
- * transcription is in flight:
- *   - at most one request is ever waiting, so a single result slot is enough;
- *   - at most one subscriber is ever live, so `sink` is a slot rather than a set.
- * Route exclusivity is what upholds the second one today: `ChatPage` also mounts
- * embedded (`ArtifactChatPanel`, the app-sdk `ChatPanel`), and if two instances
- * ever co-mounted the later would silently detach the earlier.
+ * One invariant, resting on the fact that the caller refuses to start a session
+ * while a transcription is in flight: at most one request is ever waiting, so a
+ * single result slot is enough.
+ *
+ * Subscribers are a SET, not a slot (chat-core P3-b). Every composer that can
+ * dictate mounts its own voice hook — the main chat, each split pane, each Crew
+ * Members DM — and they co-mount routinely (the session grid keeps ChatPage's
+ * hook alive under N panes). `begin` fans out so every instance reads the same
+ * global "a transcription is in flight" fact; that is what disables the mic on
+ * every other composer while one is busy. `settle` releases busy on every
+ * instance but delivers the TEXT once: to the instance whose composer owns the
+ * session (`owns`), and only when none claims it, to every instance — the legacy
+ * single-subscriber shape, which each host's own routing (ChatPage: append to
+ * that slot's persisted draft; a pane: drop) then decides.
  */
 
 /** A transcription request in flight. */
@@ -50,18 +56,41 @@ export interface TranscriptResult {
 
 export interface TranscriptSink {
   begin: (request: PendingTranscription) => void
-  settle: (result: TranscriptResult) => void
+  /**
+   * `deliver` is false when another subscriber claimed the transcript: release
+   * this instance's busy state for the request, surface an error if any, but do
+   * NOT hand the text to the host — it would land in two composers.
+   */
+  settle: (result: TranscriptResult, deliver: boolean) => void
+  /**
+   * True when this subscriber's composer is the one on screen for `sessionId`.
+   * Optional: a subscriber without it never claims and only receives the text on
+   * the unclaimed fallback path.
+   */
+  owns?: (sessionId: string | null) => boolean
 }
 
-let sink: TranscriptSink | null = null
+const sinks = new Set<TranscriptSink>()
 /** Result waiting for a subscriber. A newer one replaces it: the invariant allows
  *  only one, and the newer utterance is the one a user still wants. */
 let pending: TranscriptResult | null = null
 let inFlight: PendingTranscription | null = null
 let nextId = 0
 
+/** Deliver one settled result to the live subscribers with single-owner text delivery. */
+function dispatchSettle(result: TranscriptResult): void {
+  const live = [...sinks]
+  const owners = live.filter(s => s.owns?.(result.sessionId) === true)
+  // A claimed transcript goes to exactly one composer. Several claimants means
+  // two hosts both believe they show the session (ChatPage's hook under a split
+  // pane of the same slot); the most recently subscribed one is the pane the
+  // user is looking at, so it wins.
+  const target = owners.length ? owners[owners.length - 1] : null
+  for (const s of live) s.settle(result, target ? s === target : true)
+}
+
 /**
- * Register the delivery target. An already-running request is replayed as a
+ * Register a delivery target. An already-running request is replayed as a
  * `begin` so a returning instance restores the busy indicator, and a result that
  * settled while no instance existed is handed over.
  *
@@ -73,45 +102,43 @@ let nextId = 0
  * runs after the whole effect flush, which is when the composer knows which slot
  * it holds.
  *
- * It delivers to whichever sink is current when it runs, not to the one that
+ * It delivers to whichever sinks are current when it runs, not to the one that
  * scheduled it: StrictMode subscribes, tears down and resubscribes within that
  * window, so keying on the scheduling subscription would strand the text on
  * every mount in development.
  */
 export function subscribeTranscripts(next: TranscriptSink): () => void {
-  sink = next
+  sinks.add(next)
   if (inFlight) next.begin(inFlight)
   const handover = pending
   pending = null
   if (handover) {
     queueMicrotask(() => {
-      const target = sink
       // Nothing mounted any more: keep holding the text for the next instance
-      // rather than delivering into a sink that is gone. A result that arrived
+      // rather than delivering into sinks that are gone. A result that arrived
       // in the meantime is newer and wins.
-      if (!target) { pending = pending ?? handover; return }
-      target.settle(handover)
+      if (!sinks.size) { pending = pending ?? handover; return }
+      dispatchSettle(handover)
     })
   }
-  return () => {
-    // Only if still ours: a newer subscriber has already taken the slot and
-    // clearing it here would leave that live instance unreachable.
-    if (sink === next) sink = null
-  }
+  return () => { sinks.delete(next) }
 }
 
 /** Announce a started transcription and return its identity. */
 export function beginTranscription(sessionId: string | null): PendingTranscription {
   inFlight = { id: ++nextId, sessionId }
-  sink?.begin(inFlight)
+  for (const s of sinks) s.begin(inFlight)
   return inFlight
 }
 
-/** Deliver a request's outcome to the live subscriber, or hold it for the next. */
+/** Deliver a request's outcome to the live subscribers, or hold it for the next. */
 export function settleTranscription(result: TranscriptResult): void {
   // Guarded so a straggler cannot clear a NEWER request's in-flight record and
   // leave a returning instance showing idle while that one is still running.
   if (inFlight?.id === result.id) inFlight = null
-  if (sink) { sink.settle(result); return }
+  if (sinks.size) { dispatchSettle(result); return }
   pending = result
 }
+
+/** Test seam: number of live subscribers. */
+export function _subscriberCount(): number { return sinks.size }
