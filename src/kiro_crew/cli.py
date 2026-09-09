@@ -49,7 +49,7 @@ from kiro_crew.config.loader import (
     DASHBOARD_PORT,
     build_provider_factory,
 )
-from kiro_crew.config.paths import _default_home, _legacy_home
+from kiro_crew.config.paths import _default_home, _legacy_home, adopt_isolated_kiro_home
 from kiro_crew.constants import BANNER, MIN_NODE_MAJOR, env_flag_enabled
 from kiro_crew.crash_guard import install as _install_crash_guard
 from kiro_crew.env import git_build_info
@@ -2650,6 +2650,29 @@ The dashboard port is set with the KIROCREW_PORT env var, not a config key.
     # detach-spawned gateway needs double-write protection (stderr IS
     # gateway.log in that mode) — see _setup_cli_logging.
     _setup_cli_logging(args.command, args.verbose)
+
+    # A non-default data home owns its OWN kiro-cli home. The agents dir
+    # kiro-cli reads is ``<kiro home>/agents``, and the default kiro home is the
+    # machine-wide ``~/.kiro`` — not under KIROCREW_HOME — so a gateway booted on
+    # a scratch/dev home without this would rebuild the operator's shared specs
+    # and pin its own home into every managed MCP server's env, breaking strict
+    # identity for every session of the REAL gateway. Exporting
+    # KIRO_HOME=<data home>/kiro here, in the one prologue every subcommand
+    # shares, makes this process, the kiro-cli it spawns and the ``kirocrew
+    # mcp-*`` stubs under it agree on one kiro home. No-op on the default home or
+    # when KIRO_HOME is already set. After logging is up so the adoption line
+    # lands in gateway.log, and before any subcommand resolves kiro_home() or
+    # spawns kiro-cli.
+    if adopt_isolated_kiro_home() is not None:
+        # The export changed what ``kiro_agents_dir()`` resolves, and
+        # ``hooks`` memoizes that path (as the UNC gate's trusted root) keyed on
+        # KIRO_HOME, primed at ITS import. If it is already loaded, re-prime now
+        # -- synchronously, off the loop -- so the first gate check on the event
+        # loop does not pay the resolve (an SMB round-trip on a UNC home). Not yet
+        # loaded means its import-time priming will see the adopted value.
+        hooks_mod = sys.modules.get("kiro_crew.hooks")
+        if hooks_mod is not None:
+            hooks_mod.prime_unc_agents_root()
 
     # No subcommand given (`kirocrew` with no args) — show banner + help and exit.
     # Without this guard, the `args.command.startswith("mcp-")` branch later

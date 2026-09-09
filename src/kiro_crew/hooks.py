@@ -2072,6 +2072,25 @@ def _unc_agents_root() -> Path | None:
 # start, off the loop, so the one resolution per configuration lands there.
 # Best-effort: a failure here memoizes root-absent exactly as a lazy miss would.
 _unc_agents_root()
+
+
+def prime_unc_agents_root() -> None:
+    """Re-run the import-time priming after the process changed ``KIRO_HOME``.
+
+    The memo above is keyed on the raw ``KIRO_HOME``, and it is primed when this
+    module is imported -- which on the CLI path happens BEFORE the prologue
+    decides the kiro home (``config.paths.adopt_isolated_kiro_home`` exports
+    ``KIRO_HOME`` for a non-default data home). After that export the primed
+    entry stops matching, and the FIRST gate check would pay the resolving
+    accessor on whatever thread asked -- on an async validation path, the event
+    loop, and on a UNC-shaped home that is an SMB round-trip. The prologue calls
+    this right after adopting, synchronously and off the loop, so the one
+    resolution per configuration still lands at process start. Idempotent: with
+    an unchanged configuration it is a dict-key comparison.
+    """
+    _unc_agents_root()
+
+
 #: Upper bound on the Windows leaf link chain validate_file_path will walk
 #: hop-by-hop before refusing. Mirrors the kernels' own symlink-resolution
 #: ceilings (Linux SYMLOOP_MAX chains resolve to ELOOP at 40): a longer

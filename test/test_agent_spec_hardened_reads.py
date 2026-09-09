@@ -911,6 +911,9 @@ _EXPECTED_CALL_SITE_LABELS: dict[str, list[tuple[str, str]]] = {
         ("connections_warm_mint", "dashboard"),
     ],
     "kiro_crew/context.py": [("steering_resources", "unknown")],
+    # doctor's spec-home drift check reads every spec in the agents dir it
+    # inspects; same surface labels as cli_doctor's own reads.
+    "kiro_crew/doctor_spec_home.py": [("doctor", "cli")],
     "kiro_crew/cron_script.py": [("cron_resolve_mcp_server", "cron")],
     "kiro_crew/dashboard/handlers/agents.py": [
         ("api_agent_detail", "dashboard"),

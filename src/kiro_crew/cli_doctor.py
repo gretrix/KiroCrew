@@ -70,6 +70,7 @@ from kiro_crew.dashboard.origin import (
 from kiro_crew.deny_guidance import credential_vendor_server_ids
 from kiro_crew.discord import install_url, intent_probe
 from kiro_crew.doctor_deadpath import doctor_dead_paths
+from kiro_crew.doctor_spec_home import doctor_spec_home_drift
 from kiro_crew.embeddings import (
     _LIB_PATH_ENV,
     _load_llama_class,
@@ -3060,6 +3061,11 @@ def _doctor(platform_boot_error: "Exception | None" = None, bundle: bool = False
     _doctor_cron_script_sources(issues)
     _doctor_path_launcher()
     _doctor_trust_root()
+    # Right after the trust root, deliberately: a healthy trust root here plus
+    # "signed pid mapping did not verify" in every session is the shape this
+    # check exists for, and it names the cause — a shared spec pinning a
+    # different KIROCREW_HOME than the one doctor (and the gateway) run on.
+    doctor_spec_home_drift(issues, agents_dir=_agents_dir())
     _doctor_strict_identity(cfg)
     _doctor_mcp_gateway_daemon(issues)
 
