@@ -243,6 +243,14 @@ the authority narrowed by it: allow-lists intersect, deny-lists union, a strictn
 level takes the stricter value. A subordinate cannot repeal by omission either — a
 scope it simply leaves out keeps the authority's value.
 
+Two values a subordinate sets are kept only when the authority left them empty:
+`updates.source` (where both name one, the authority's glob stands — two globs have no
+expressible intersection) and `channels.posture` (the authority's posture wins; a
+subordinate posture is not yet folded — #9798). A `min_version`
+floor does fold: the higher of the two wins. An unreadable
+`~/.kiro/crew/security_policy.json` beneath a central document is skipped with one
+warning rather than refusing boot; the authority governs unchanged.
+
 ```bash
 KIROCREW_POLICY_URL=https://config.corp.example/kirocrew/security_policy.json
 KIROCREW_POLICY_HEADERS='{"Authorization":"Bearer <per-machine token>"}'

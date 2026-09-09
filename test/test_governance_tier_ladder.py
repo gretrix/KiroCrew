@@ -978,3 +978,55 @@ class TestAnExplicitDefaultDistributionIsDeclared:
             )
         )
         assert refreshed.distribution.on_unavailable == governance.UNAVAILABLE_FAIL_CLOSED
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# An unreadable home file beneath a present authority is skipped, not fatal
+# ──────────────────────────────────────────────────────────────────────────
+class TestAnUnreadableHomeFileBeneathAnAuthorityIsSkipped:
+    """A read error in the home file is fatal only when that file is the sole ceiling.
+
+    The home file is folded beneath the central document on every load and on every
+    refresh poll. Raising on a read error there would let whoever
+    owns ``~/.kiro/crew`` refuse boot and freeze every refresh on a fleet host -- an
+    availability lever, not a tightening. Beneath an authority the file is skipped
+    with one warning and the authority governs unchanged; with no authority it is the
+    only ceiling and its error stays fatal (``test_governance_distribution.py``).
+    """
+
+    @pytest.fixture
+    def broken_home(self, monkeypatch, tmp_path):
+        home = tmp_path / "home.json"
+        home.write_text("{ not json", encoding="utf-8")
+        _point_home(monkeypatch, home)
+        return home
+
+    def test_the_authority_governs_unchanged_at_boot(self, central, broken_home):
+        central("fleet")
+        ceiling = load_security_policy()
+        assert ceiling is not None
+        assert ceiling.identity_issuer == "fleet"
+        assert ceiling.tier == TIER_CENTRAL
+
+    def test_the_skip_is_announced_once_per_process(self, central, broken_home, caplog):
+        central("fleet")
+        with caplog.at_level("WARNING", logger=governance.logger.name):
+            load_security_policy()
+            load_security_policy()
+        hits = [r for r in caplog.records if "is unreadable" in r.getMessage()]
+        assert len(hits) == 1
+        assert str(broken_home) in hits[0].getMessage()
+
+    def test_a_refresh_keeps_the_authority_too(self, central, broken_home):
+        # ``compose_installed_ceiling`` re-reads the home file on every poll; a raise
+        # here would reject every refresh and let the cache age toward fail-closed.
+        central("fleet")
+        fetched = governance.parse_policy(_doc("fleet"))
+        refreshed = governance.compose_installed_ceiling(fetched)
+        assert refreshed.identity_issuer == "fleet"
+
+    def test_with_no_authority_the_error_is_still_fatal(self, broken_home):
+        from kiro_crew.platform.context import PlatformCompositionError
+
+        with pytest.raises(PlatformCompositionError, match="is unreadable"):
+            load_security_policy()

@@ -77,10 +77,10 @@ from kiro_crew.sel import sel
 
 logger = logging.getLogger(__name__)
 
-# Where the enterprise security policy is read from.  Env wins so a managed
-# fleet can point at a root-owned / read-only location without a package
-# rebuild; the home file is the standalone operator's authoring location.  The
-# companion-bundled resource (precedence step 2) is resolved separately by the
+# Where the local security policy tiers are read from.  Both sit BENEATH the
+# centrally distributed document and may only tighten it (``compose_tier_ladder``);
+# the env file is the first subordinate, the home file the standalone operator's
+# authoring location.  The companion-bundled resource is resolved separately by the
 # caller that knows the active edition (see ``load_security_policy``).
 _POLICY_ENV = "KIROCREW_SECURITY_POLICY"
 _POLICY_HOME_LEAF = "security_policy.json"
@@ -2828,7 +2828,15 @@ def _policy_signature_state(
     # fallback: a tampered policy would yield an UNGOVERNED host even with
     # ``require_policy_signature`` on, inverting the flag. Encoding both sides
     # keeps every malformed signature an ordinary UNVERIFIED verdict.
-    if hmac.compare_digest(expected.encode("utf-8"), signature.encode("utf-8")):
+    #
+    # ``surrogatepass`` for the same reason: ``json.loads`` accepts a lone surrogate
+    # (``"\udc80"``) and a strict ``encode`` raises UnicodeEncodeError -- a ValueError,
+    # not a composition error, with the same ungoverned outcome. The ladder verifies a
+    # user-owned home file BENEATH the central document on every load, so without this
+    # one byte in that file would take the fleet ceiling out of the process.
+    if hmac.compare_digest(
+        expected.encode("utf-8"), signature.encode("utf-8", errors="surrogatepass")
+    ):
         return SIGNATURE_VERIFIED, f"issuer {issuer!r}"
     return SIGNATURE_UNVERIFIED, f"signature does not match trust key for issuer {issuer!r}"
 
@@ -2981,6 +2989,10 @@ class _TierProcessState:
     this the bundled rung would drop out of the ladder at the first poll, loosening a
     ceiling an edition tightened. The packaged resource is static for the process.
 
+    ``home_unreadable_warned`` -- the one-time warning that an unreadable home file
+    beneath a present authority was skipped has fired. Once, because the fold runs on
+    every refresh poll and a warning per poll would be a warning per interval.
+
     ``env_beneath_central_warned`` -- the one-time warning that
     ``KIROCREW_SECURITY_POLICY`` only tightens has fired. A runbook may still describe
     it as a rollback lever that outranks the central document; the first compose of
@@ -3006,6 +3018,7 @@ class _TierProcessState:
 
     last_bundled: Optional[Mapping[str, object]] = None
     env_beneath_central_warned: bool = False
+    home_unreadable_warned: bool = False
     tier_intersects_audited: "set[Tuple[str, str]]" = field(default_factory=set)
     last_composed: Optional["GovernanceCeiling"] = None
 
@@ -3177,6 +3190,24 @@ def _audit_policy_tier(operation: str, authority_tier: str, lower_tier: str) -> 
         logger.debug("policy tier SEL emit unavailable", exc_info=True)
 
 
+def _warn_home_unreadable_beneath_authority_once(home_path: Path, error: Exception) -> None:
+    """Say once per process that an unreadable home file was skipped beneath the authority.
+
+    The authority still governs, so nothing loosened; but a local operator who meant
+    that file to tighten the ceiling must be able to see that it did not.
+    """
+    if _process_state.home_unreadable_warned:
+        return
+    _process_state.home_unreadable_warned = True
+    logger.warning(
+        "security policy at %s is unreadable (%s); skipped beneath the central "
+        "authority, which governs unchanged. Fix or remove the file for a local "
+        "tightening to apply.",
+        home_path,
+        error,
+    )
+
+
 def _warn_env_beneath_central_once(authority_tier: str) -> None:
     """Say once per process that the env document now only TIGHTENS the fleet ceiling.
 
@@ -3276,11 +3307,20 @@ def _subordinate_ceiling(
     home_path: Path,
     env_data: Optional[Dict[str, object]] = None,
     env_path: Optional[Path] = None,
+    *,
+    beneath_authority: bool = False,
 ) -> Optional[GovernanceCeiling]:
     """Tiers 2-4, first present wins: env -> bundled -> home.
 
     Mutually exclusive by design, and collectively the *subordinate*: whichever one
     is present may only tighten whatever authority sits above it.
+
+    *beneath_authority* says a central document is present above this fold. An
+    unreadable home file is then reported and treated as ABSENT rather than raised:
+    the authority still governs, which is the fail-closed direction, and a raise
+    would hand whoever owns ``~/.kiro/crew`` a lever that refuses boot and freezes
+    every refresh on a fleet host -- an availability lever, not a tightening. With
+    no authority the home file is the only ceiling, so its error stays fatal.
 
     *env_data* / *env_path* let a caller that ALREADY read the env document hand it
     over instead of having this function read the file a second time -- which matters
@@ -3305,6 +3345,9 @@ def _subordinate_ceiling(
         bundled_state = _verify_policy_signature(bundled, source="companion-bundled resource")
         return replace(parse_policy(bundled, signature_state=bundled_state), tier=TIER_BUNDLED)
     if home_error is not None:
+        if beneath_authority:
+            _warn_home_unreadable_beneath_authority_once(home_path, home_error)
+            return None
         raise PlatformCompositionError(
             f"security policy at {home_path} is unreadable: {home_error}"
         ) from home_error
@@ -3367,7 +3410,11 @@ def compose_installed_ceiling(central: GovernanceCeiling) -> GovernanceCeiling:
     """
     home_data, home_error, home_path = _read_home_policy()
     subordinate = _subordinate_ceiling(
-        _process_state.last_bundled, home_data, home_error, home_path
+        _process_state.last_bundled,
+        home_data,
+        home_error,
+        home_path,
+        beneath_authority=True,
     )
     # Tagged here exactly as boot tags it: ``parse_distributed_policy`` returns an
     # untiered ceiling, and an untagged authority makes ``compose_tier_ladder``'s
@@ -3498,7 +3545,13 @@ def load_security_policy(
 
     # Tiers 2–4 — the subordinate, first present wins.
     subordinate = _subordinate_ceiling(
-        bundled, home_data, home_error, home_path, env_data, env_path
+        bundled,
+        home_data,
+        home_error,
+        home_path,
+        env_data,
+        env_path,
+        beneath_authority=central is not None,
     )
 
     composed = compose_tier_ladder(central, subordinate)
@@ -3580,8 +3633,8 @@ def assert_policy_signature_satisfied(ceiling: Optional[GovernanceCeiling]) -> N
       ceiling whatsoever, the exact failure the flag exists to prevent.
 
     Enforcing here rather than in the loader is what makes tier precedence work.
-    ``load_security_policy`` walks env → companion bundle → operator home and runs
-    more than once per boot with different arguments (the core with no
+    ``load_security_policy`` folds the central document over env → companion bundle →
+    operator home and runs more than once per boot with different arguments (the core with no
     ``bundled_loader``, an edition with one).  A raise inside it fires on whichever
     tier that particular pass happened to reach: the core's loader-less pass falls
     through to an unsigned HOME file and would abort even when the edition's later

@@ -18,6 +18,7 @@ import logging
 
 import pytest
 
+from kiro_crew.platform import governance
 from kiro_crew.platform.context import PlatformCompositionError
 from kiro_crew.platform.governance import (
     CAPABILITY,
@@ -1210,6 +1211,22 @@ class TestPolicySignatureStates:
             ceiling = load_security_policy()
             assert ceiling is not None
             assert ceiling.signature_state == SIGNATURE_UNVERIFIED
+
+    def test_a_lone_surrogate_signature_is_unverified_not_a_crash(self):
+        """``json.loads`` accepts ``"\\udc80"``; a strict ``encode`` would raise.
+
+        A UnicodeEncodeError is a ValueError, not a PlatformCompositionError, so it
+        would escape the loader and the host would degrade to ungoverned. The tier
+        ladder verifies a user-owned home file beneath the central document on every
+        load, so this is one byte in that file removing the fleet ceiling. It must
+        classify like every other malformed signature instead.
+        """
+        doc = json.loads(
+            '{"version": 1, "boot": {"fail_closed": true}, '
+            '"identity": {"issuer": "corp", "signature": "\\udc80"}}'
+        )
+        state, _detail = governance._policy_signature_state(doc, {"corp": "k"})
+        assert state == SIGNATURE_UNVERIFIED
 
     def test_non_ascii_signature_fails_closed_when_required(self, monkeypatch, tmp_path):
         """...and with the opt-in ON it must ABORT, not degrade to ungoverned."""
