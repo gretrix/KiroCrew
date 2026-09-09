@@ -312,7 +312,14 @@ from kiro_crew.dashboard.chat_utils import (  # noqa: E402
     MODEL_UNENTITLED_KIND,
     SUBAGENT_COMPLETION_KIND,
     SYNTHETIC_RECOVERY_KIND,
+    TRANSIENT_GIVE_UP_TEXT,
+    TRANSIENT_NOTICE_GIVE_UP,
+    TRANSIENT_NOTICE_META_KEY,
+    TRANSIENT_NOTICE_RESUMING,
+    TRANSIENT_NOTICE_RETRYING,
+    TRANSIENT_RESUMING_TEXT,
     TRANSIENT_RETRY_KIND,
+    TRANSIENT_RETRYING_TEXT,
     EmptyTurnActivity,
     RecoveryPayload,
     classify_empty_turn,
@@ -12023,9 +12030,12 @@ async def _run_chat(
                 # terminal: the tag stops the UI re-offering a choice that re-runs itself.
                 slot.append(
                     "error",
-                    "⟳ Backend hiccup — retrying…",
+                    TRANSIENT_RETRYING_TEXT,
                     "msg msg-err",
-                    meta={"kind": TRANSIENT_RETRY_KIND},
+                    meta={
+                        "kind": TRANSIENT_RETRY_KIND,
+                        TRANSIENT_NOTICE_META_KEY: TRANSIENT_NOTICE_RETRYING,
+                    },
                 )
                 await asyncio.sleep(_delay)
                 _queue_recovery(
@@ -12039,7 +12049,12 @@ async def _run_chat(
             else:
                 # depth>0 (nested turn): don't re-queue — surface a clean
                 # transient status; the live session stays resumable.
-                slot.append("error", "⟳ Backend hiccup — please retry.", "msg msg-err")
+                slot.append(
+                    "error",
+                    TRANSIENT_GIVE_UP_TEXT,
+                    "msg msg-err",
+                    meta={TRANSIENT_NOTICE_META_KEY: TRANSIENT_NOTICE_GIVE_UP},
+                )
         elif (
             not _turn_emitted
             and acp_error_is_transient(exc)
@@ -12198,9 +12213,12 @@ async def _run_chat(
             _will_recover = not _should_suppress_requeue(slot) and _prompt_depth == 0
             slot.append(
                 "error",
-                "⟳ Backend hiccup — recovering…",
+                TRANSIENT_RESUMING_TEXT,
                 "msg msg-err",
-                meta={"kind": TRANSIENT_RETRY_KIND} if _will_recover else None,
+                meta={
+                    TRANSIENT_NOTICE_META_KEY: TRANSIENT_NOTICE_RESUMING,
+                    **({"kind": TRANSIENT_RETRY_KIND} if _will_recover else {}),
+                },
             )
             if _will_recover:
                 _delay = transient_retry_delay(1)  # single short backoff (one-shot)
