@@ -1672,6 +1672,10 @@ class AcpError(Exception):
             self.rejected_model: str | None = None
         if not hasattr(self, "advertised"):
             self.advertised: list[str] = []
+        # Sign-in failure tag, set by :func:`_raise_acp_error` when the raw frame
+        # is a session-expiry / rejected-credential answer, so the dashboard's
+        # error row can offer the Kiro sign-in card instead of a retry.
+        self.auth_required: bool = False
 
 
 class AcpTimeoutError(AcpError):
@@ -2448,10 +2452,15 @@ def _format_acp_error(error: object, available_models: Sequence[str] | None = No
         elif _is_session_expired(haystack):
             # Session expiry (401/403, or prose saying as much) — distinct from
             # the Bedrock credential errors above. Retrying or switching models
-            # cannot succeed, so the message must not suggest either.
+            # cannot succeed, so the message must not suggest either. Names both
+            # remedies because the formatter cannot see which auth owner the
+            # process ran under: a Crew-owned relay is fixed from the dashboard's
+            # Kiro sign-in card (the error row links there), a kiro-cli-owned
+            # one from the terminal.
             formatted = (
-                "Your session has expired. Run `kiro-cli login` in your "
-                "terminal to sign back in, then start a new chat. "
+                "Your session has expired. Sign in to Kiro again — from Settings "
+                "→ Kiro sign-in, or `kiro-cli login` in your terminal if kiro-cli "
+                "owns the sign-in — then start a new chat. "
                 "Retrying or switching models will not help — this is a "
                 "sign-in issue, not a backend error."
                 f"{req_id_suffix}"
@@ -2629,6 +2638,19 @@ def _raise_acp_error(error: object, available_models: Sequence[str] | None = Non
     if rejected:
         err.rejected_model = rejected
         err.advertised = list(available_models or [])
+    # Tag a session-expiry / rejected-credential answer so the dashboard can offer
+    # the fix -- the Kiro sign-in card -- instead of a Continue that hits the same
+    # wall. Decided from the raw frame, never from the prose, and only when the
+    # formatter would have reached its sign-in branch: a Bedrock-named credential
+    # exception (`_RE_AUTH`, a different remedy) or a usage-limit answer that
+    # happens to carry a 401/403 is not a Kiro sign-in problem.
+    if (
+        not rejected
+        and _is_session_expired(raw_data)
+        and not _RE_AUTH.search(raw_data)
+        and not _RE_USAGE_LIMIT.search(raw_data)
+    ):
+        err.auth_required = True
     raise err
 
 

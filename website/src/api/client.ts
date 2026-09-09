@@ -1943,9 +1943,9 @@ export interface KiroCreditUsage {
 
 export interface KasLoginStatus {
   authenticated: boolean
-  /** Provider of the active sign-in (e.g. 'google', 'github', 'builder_id'), null when signed out. */
+  /** Provider of the active sign-in as the token records it ('Google', 'Github', 'BuilderId', 'Enterprise'), '' when signed out. */
   provider: string | null
-  /** Human-readable account identity (email / profile ARN), null when signed out. */
+  /** Which vault slot the sign-in occupies ('social' | 'builder_id' | 'identity_center' | 'external_idp'); the value `kasLoginLogout` takes. '' when signed out. */
   identity: string | null
   /**
    * How a sign-in can return to this gateway. 'loopback' means the browser and
@@ -1954,6 +1954,26 @@ export interface KasLoginStatus {
    * approves a short code in their own browser (no callback required).
    */
   transport: 'loopback' | 'device'
+  /** ISO-8601 UTC instant the stored access token stops working; null when signed out. */
+  expires_at: string | null
+  /** True when the access token is at or inside the engine's refresh margin. */
+  expired: boolean
+  /** True when a refresh token is stored to renew the access token with. */
+  has_refresh_token: boolean
+  /**
+   * True when the issuer refused the last refresh: the sign-in looks renewable
+   * but is not, and only signing in again fixes it. Cleared by any new
+   * credential landing in the slot.
+   */
+  refresh_rejected: boolean
+  /**
+   * The spawn-time verdict: can this identity still answer an agent's
+   * credential request without a sign-in? Same predicate `kirocrew doctor`
+   * prints. Independent of `refresh_rejected` on purpose: a rejected refresh
+   * is reported to the user, never used to hand the agent back to kiro-cli's
+   * login behind their back.
+   */
+  usable: boolean
 }
 
 export interface KasLoginDeviceSession {
@@ -2375,8 +2395,11 @@ export const api = {
   // Idempotent: releases a loopback listener's port early on every start-over path.
   kasLoginCancel: (login_id: string) =>
     post('/api/kas-login/cancel', { login_id }).then(j) as Promise<{ ok: boolean }>,
+  // Deletes the stored sign-in for one vault slot (`KasLoginStatus.identity`)
+  // and recycles running agent processes that loaded it. Answers `{ok}`; the
+  // card re-reads status afterwards, which is the single authority on state.
   kasLoginLogout: (identity: string) =>
-    post('/api/kas-login/logout', { identity }).then(j) as Promise<KasLoginStatus>,
+    post('/api/kas-login/logout', { identity }).then(j) as Promise<{ ok: boolean }>,
   onboardingImportScan: () =>
     get('/api/onboarding/import/scan').then(j) as Promise<AgentImportScanResponse>,
   onboardingImportApply: (body: AgentImportApplyRequest) =>

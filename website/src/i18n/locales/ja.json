@@ -6326,7 +6326,8 @@
       "loopback_use_code": "代わりにコードを使う",
       "loopback_slow_hint": "時間がかかっていますか？サインインページがこのコンピューターに到達できない場合は、コードに切り替えてください。どの端末からでも使えます。",
       "loopback_fell_back": "サインインの結果がこのコンピューターに直接戻れなかったため、代わりにコードを表示しています。",
-      "cancel_unsettled": "サインインをキャンセルできませんでした。サインインはまだ有効です。同じ項目をもう一度押して再試行してください。"
+      "cancel_unsettled": "サインインをキャンセルできませんでした。サインインはまだ有効です。同じ項目をもう一度押して再試行してください。",
+      "card_intro": "エージェントはこの Kiro アカウントとして動作し、kiro-cli のログインには依存しません。"
     },
     "kiroPrerequisiteGate": {
       "agent_specs_missing": "エージェント仕様が見つかりません",
@@ -9090,7 +9091,9 @@
         "pick_model_hint": "モデルピッカーを開き、アカウントで利用できるモデルを選んでから、メッセージをもう一度送信してください。",
         "both_hint": "両方を行ってください。「{{pick}}」でこのセッションを直し、「{{default}}」はデフォルトが同じモデルの場合に新しいセッションがそのモデルで始まらないようにします。その後、メッセージをもう一度送信してください。",
         "elsewhere_hint": "モデルピッカーと「設定 → チャット」はメインのチャットウィンドウにあります。そこでモデルを選び、デフォルトモデルを変更してください。",
-        "elsewhere_settings_hint": "「設定 → チャット」はメインのチャットウィンドウにあります。そこでデフォルトモデルを変更してください。"
+        "elsewhere_settings_hint": "「設定 → チャット」はメインのチャットウィンドウにあります。そこでデフォルトモデルを変更してください。",
+        "sign_in": "Kiro にサインイン",
+        "sign_in_hint": "「設定 → 概要 → Kiro サインイン」を開いて再度サインインし、メッセージをもう一度送信してください。"
       },
       "folderPanel": {
         "clear_search": "検索をクリア",
@@ -13770,6 +13773,25 @@
         "manage_webhooks": "Webhooks を管理",
         "tokens_count_other": "アクセストークン {{count}} 個",
         "could_not_read_webhook_status": "webhook の状態を取得できませんでした — ゲートウェイが起動していない可能性があります"
+      },
+      "kiroSignInCard": {
+        "title": "Kiro サインイン",
+        "registry_description": "エージェントが使用する Kiro アカウントにサインイン、またはサインアウトします。",
+        "checking": "サインイン状態を確認しています…",
+        "signed_in_with": "{{provider}} でサインイン済み",
+        "signed_in_body": "エージェントはこの Kiro アカウントとして動作します。アクセストークンは自動的に更新されます。",
+        "access_token_expires": "アクセストークンは {{when}} に期限切れになります（{{at}}）。",
+        "expired_renews_on_next_use": "アクセストークンは期限切れです。次にエージェントが必要としたときに更新されます。",
+        "expired_no_refresh": "アクセストークンは期限切れで、更新に使える資格情報がありません。",
+        "refresh_rejected": "Kiro がこのサインインの更新を拒否しました。",
+        "sign_in_expired": "サインインが失効しました",
+        "sign_in_expired_body": "{{provider}} のサインインは無効になりました。再度サインインするまで、エージェントは未サインインと報告します。kiro-cli のログインへ自動的に切り替わることはありません。",
+        "sign_in_again": "再度サインイン",
+        "switch_account": "アカウントを切り替え",
+        "sign_out": "サインアウト",
+        "takes_effect_next_process": "今後起動するエージェントプロセスに適用されます。実行中のセッションは次のターンで切り替わります。",
+        "could_not_sign_out": "サインアウトできませんでした",
+        "keep_current_sign_in": "現在のサインインを維持"
       }
     },
     "settingsPage": {

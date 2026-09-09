@@ -94,16 +94,22 @@ async def test_status_unauthenticated(tmp_path, monkeypatch):
         "provider": "",
         "identity": "",
         "transport": "device",
+        "expires_at": None,
+        "expired": False,
+        "has_refresh_token": False,
+        "refresh_rejected": False,
+        "usable": False,
     }
 
 
 async def test_status_reports_stored_token(tmp_path, monkeypatch):
     monkeypatch.setenv("KIRO_AUTH_TRANSPORT", "loopback")
     store = TokenStore(tmp_path)
+    expires = datetime.now(timezone.utc) + timedelta(hours=1)
     store.save(
         KasToken(
             access_token="at",
-            expires_at=datetime.now(timezone.utc) + timedelta(hours=1),
+            expires_at=expires,
             provider="Google",
             identity="social",
             profile_arn="arn:aws:x",
@@ -115,6 +121,65 @@ async def test_status_reports_stored_token(tmp_path, monkeypatch):
     assert status["provider"] == "Google"
     assert status["identity"] == "social"
     assert status["transport"] == "loopback"
+    # Token-free usability fields for the dashboard card: the access token is
+    # live, nothing renews it, nothing has been refused, and the shared predicate
+    # (KasToken.is_usable) says the identity can still answer a callback.
+    assert status["expires_at"] == expires.isoformat()
+    assert status["expired"] is False
+    assert status["has_refresh_token"] is False
+    assert status["refresh_rejected"] is False
+    assert status["usable"] is True
+    # Never the credential itself, under any spelling.
+    assert "access_token" not in status
+    assert "refresh_token" not in status
+    assert "at" not in status.values()
+
+
+async def test_status_reports_expired_without_refresh_as_unusable(tmp_path, monkeypatch):
+    monkeypatch.setenv("KIRO_AUTH_TRANSPORT", "device")
+    store = TokenStore(tmp_path)
+    store.save(
+        KasToken(
+            access_token="at",
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            provider="Google",
+            identity="social",
+            profile_arn="arn:aws:x",
+        )
+    )
+    service = KasLoginService(store, session=_FakeSession())
+    status = await service.status()
+    # Still "authenticated" (something is stored) but the card must say it is
+    # not usable: expired access token and nothing to renew it with.
+    assert status["authenticated"] is True
+    assert status["expired"] is True
+    assert status["has_refresh_token"] is False
+    assert status["usable"] is False
+
+
+async def test_status_reports_issuer_rejection_without_flipping_usable(tmp_path, monkeypatch):
+    monkeypatch.setenv("KIRO_AUTH_TRANSPORT", "device")
+    store = TokenStore(tmp_path)
+    store.save(
+        KasToken(
+            access_token="at",
+            expires_at=datetime.now(timezone.utc) - timedelta(minutes=1),
+            provider="Google",
+            identity="social",
+            refresh_token="rt",
+            profile_arn="arn:aws:x",
+        )
+    )
+    store.mark_refresh_rejected("social")
+    service = KasLoginService(store, session=_FakeSession())
+    status = await service.status()
+    # The refusal is REPORTED so the card can say "sign in again"; `usable`
+    # still reflects the shared spawn-time predicate (a refresh token is
+    # present), because a lapsed Crew identity is surfaced, not silently
+    # demoted to kiro-cli's login.
+    assert status["refresh_rejected"] is True
+    assert status["has_refresh_token"] is True
+    assert status["usable"] is True
 
 
 async def test_begin_device_returns_public_fields_only(tmp_path, monkeypatch):

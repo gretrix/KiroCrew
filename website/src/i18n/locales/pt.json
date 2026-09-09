@@ -6530,7 +6530,8 @@
       "loopback_use_code": "Usar um código em vez disso",
       "loopback_slow_hint": "Está demorando? Se a página de login não conseguir alcançar este computador, mude para um código: funciona de qualquer dispositivo.",
       "loopback_fell_back": "O login não conseguiu voltar direto para este computador, então aqui está um código.",
-      "cancel_unsettled": "Não foi possível cancelar o login. Ele ainda está ativo: pressione a mesma opção novamente para tentar de novo."
+      "cancel_unsettled": "Não foi possível cancelar o login. Ele ainda está ativo: pressione a mesma opção novamente para tentar de novo.",
+      "card_intro": "Os agentes são executados com esta conta Kiro, sem depender de um login do kiro-cli."
     },
     "kiroPrerequisiteGate": {
       "agent_specs_missing": "Especificações de agente ausentes",
@@ -9352,7 +9353,9 @@
         "pick_model_hint": "Abra o seletor de modelos, escolha um dos modelos que a sua conta pode usar e envie sua mensagem de novo.",
         "both_hint": "Faça os dois: “{{pick}}” corrige esta sessão, “{{default}}” impede que novas sessões comecem com o mesmo modelo se ele for o padrão. Depois envie sua mensagem de novo.",
         "elsewhere_hint": "O seletor de modelos e Configurações → Chat ficam na janela principal do chat. Abra-a para escolher um modelo e alterar o padrão.",
-        "elsewhere_settings_hint": "Configurações → Chat fica na janela principal do chat. Abra-a para alterar o modelo padrão."
+        "elsewhere_settings_hint": "Configurações → Chat fica na janela principal do chat. Abra-a para alterar o modelo padrão.",
+        "sign_in": "Entrar no Kiro",
+        "sign_in_hint": "Abra Configurações → Visão geral → Login do Kiro, entre novamente e reenvie sua mensagem."
       },
       "folderPanel": {
         "clear_search": "Limpar pesquisa",
@@ -14122,6 +14125,25 @@
         "tokens_count_other": "{{count}} tokens de acesso",
         "tokens_count_many": "{{count}} tokens de acesso",
         "could_not_read_webhook_status": "Não foi possível ler o status do webhook — verifique se o gateway está em execução"
+      },
+      "kiroSignInCard": {
+        "title": "Login do Kiro",
+        "registry_description": "Entre na conta Kiro com a qual seus agentes são executados, ou saia dela.",
+        "checking": "Verificando o login…",
+        "signed_in_with": "Conectado com {{provider}}",
+        "signed_in_body": "Os agentes são executados com esta conta Kiro. O token de acesso é renovado automaticamente.",
+        "access_token_expires": "O token de acesso expira {{when}} ({{at}}).",
+        "expired_renews_on_next_use": "O token de acesso expirou e será renovado na próxima vez que um agente precisar dele.",
+        "expired_no_refresh": "O token de acesso expirou e não há nada com que renová-lo.",
+        "refresh_rejected": "O Kiro recusou renovar este login.",
+        "sign_in_expired": "Login expirado",
+        "sign_in_expired_body": "O login com {{provider}} não é mais válido. Os agentes informarão que não estão conectados até que você entre novamente — não há retorno automático para um login do kiro-cli.",
+        "sign_in_again": "Entrar novamente",
+        "switch_account": "Trocar de conta",
+        "sign_out": "Sair",
+        "takes_effect_next_process": "Vale para processos de agente iniciados a partir de agora; sessões em execução adotam a mudança no próximo turno.",
+        "could_not_sign_out": "Não foi possível sair",
+        "keep_current_sign_in": "Manter o login atual"
       }
     },
     "settingsPage": {

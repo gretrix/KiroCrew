@@ -6530,7 +6530,8 @@
       "loopback_use_code": "Usar un código en su lugar",
       "loopback_slow_hint": "¿Tarda demasiado? Si la página de inicio de sesión no puede llegar a este equipo, cambia a un código: funciona desde cualquier dispositivo.",
       "loopback_fell_back": "El inicio de sesión no pudo volver directamente a este equipo, así que aquí tienes un código.",
-      "cancel_unsettled": "No se pudo cancelar el inicio de sesión. Sigue activo: pulsa la misma opción otra vez para reintentar."
+      "cancel_unsettled": "No se pudo cancelar el inicio de sesión. Sigue activo: pulsa la misma opción otra vez para reintentar.",
+      "card_intro": "Los agentes se ejecutan con esta cuenta de Kiro, sin depender de un inicio de sesión de kiro-cli."
     },
     "kiroPrerequisiteGate": {
       "agent_specs_missing": "Faltan las especificaciones del agente",
@@ -9352,7 +9353,9 @@
         "pick_model_hint": "Abre el selector de modelos, elige uno de los que tu cuenta puede usar y vuelve a enviar tu mensaje.",
         "both_hint": "Haz ambas cosas: “{{pick}}” arregla esta sesión, “{{default}}” evita que las sesiones nuevas empiecen con el mismo modelo si está configurado como predeterminado. Después vuelve a enviar tu mensaje.",
         "elsewhere_hint": "El selector de modelos y Configuración → Chat están en la ventana de chat principal. Ábrela para elegir un modelo y cambiar el predeterminado.",
-        "elsewhere_settings_hint": "Configuración → Chat está en la ventana de chat principal. Ábrela para cambiar el modelo predeterminado."
+        "elsewhere_settings_hint": "Configuración → Chat está en la ventana de chat principal. Ábrela para cambiar el modelo predeterminado.",
+        "sign_in": "Iniciar sesión en Kiro",
+        "sign_in_hint": "Abre Ajustes → Resumen → Inicio de sesión en Kiro, vuelve a iniciar sesión y envía tu mensaje de nuevo."
       },
       "folderPanel": {
         "clear_search": "Borrar búsqueda",
@@ -14123,6 +14126,25 @@
         "tokens_count_other": "{{count}} tokens de acceso",
         "tokens_count_many": "{{count}} tokens de acceso",
         "could_not_read_webhook_status": "No se pudo leer el estado del webhook — comprueba que el gateway esté en ejecución"
+      },
+      "kiroSignInCard": {
+        "title": "Inicio de sesión en Kiro",
+        "registry_description": "Inicia sesión en la cuenta de Kiro con la que se ejecutan tus agentes, o cierra esa sesión.",
+        "checking": "Comprobando el inicio de sesión…",
+        "signed_in_with": "Sesión iniciada con {{provider}}",
+        "signed_in_body": "Los agentes se ejecutan con esta cuenta de Kiro. El token de acceso se renueva automáticamente.",
+        "access_token_expires": "El token de acceso caduca {{when}} ({{at}}).",
+        "expired_renews_on_next_use": "El token de acceso ha caducado y se renovará la próxima vez que un agente lo necesite.",
+        "expired_no_refresh": "El token de acceso ha caducado y no hay nada con qué renovarlo.",
+        "refresh_rejected": "Kiro rechazó renovar este inicio de sesión.",
+        "sign_in_expired": "Inicio de sesión caducado",
+        "sign_in_expired_body": "El inicio de sesión con {{provider}} ya no es válido. Los agentes informarán de que no han iniciado sesión hasta que vuelvas a hacerlo; no se recurre automáticamente a un inicio de sesión de kiro-cli.",
+        "sign_in_again": "Iniciar sesión de nuevo",
+        "switch_account": "Cambiar de cuenta",
+        "sign_out": "Cerrar sesión",
+        "takes_effect_next_process": "Se aplica a los procesos de agente que se inicien a partir de ahora; las sesiones en curso lo adoptan en su siguiente turno.",
+        "could_not_sign_out": "No se pudo cerrar la sesión",
+        "keep_current_sign_in": "Mantener el inicio de sesión actual"
       }
     },
     "settingsPage": {

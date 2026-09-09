@@ -193,16 +193,38 @@ class KasLoginService:
         self._session = None
 
     async def status(self) -> dict[str, Any]:
-        """Current auth state + which login transport this install shape should use."""
+        """Current auth state + which login transport this install shape should use.
+
+        Beyond ``authenticated`` the answer carries what the dashboard's sign-in card
+        needs to say WHICH state the stored identity is in, all of it token-free:
+        ``expires_at`` (ISO-8601 UTC) and ``expired`` (inside the engine's refresh
+        margin), ``has_refresh_token``, ``refresh_rejected`` (the issuer refused the
+        last refresh -- recorded by the refresher, cleared by any new credential),
+        and ``usable``, which is :meth:`KasToken.is_usable` -- the same predicate the
+        spawn-time owner decision and ``kirocrew doctor`` read, so the three cannot
+        disagree. A rejected refresh does NOT flip ``usable``: that is a report for
+        the user to act on, not a reason to hand the spawn back to kiro-cli's login.
+        """
+
+        def _read() -> tuple[KasToken | None, datetime | None]:
+            token = self._store.resolve()
+            rejected = self._store.refresh_rejected(token.identity) if token else None
+            return token, rejected
+
         # File reads happen off-loop: the store is tiny but sits on whatever disk the
         # data home lives on, and status is polled by the dashboard.
-        token = await asyncio.to_thread(self._store.resolve)
+        token, rejected = await asyncio.to_thread(_read)
         transport = select_transport()
         return {
             "authenticated": token is not None,
             "provider": token.provider if token else "",
             "identity": token.identity if token else "",
             "transport": transport.value,
+            "expires_at": token.expires_at.astimezone(timezone.utc).isoformat() if token else None,
+            "expired": token.is_expired() if token else False,
+            "has_refresh_token": bool(token.refresh_token) if token else False,
+            "refresh_rejected": rejected is not None,
+            "usable": token.is_usable() if token else False,
         }
 
     async def begin_device(

@@ -6530,7 +6530,8 @@
       "loopback_use_code": "Usa invece un codice",
       "loopback_slow_hint": "Ci vuole molto? Se la pagina di accesso non riesce a raggiungere questo computer, passa a un codice: funziona da qualsiasi dispositivo.",
       "loopback_fell_back": "L'accesso non è riuscito a tornare direttamente su questo computer, quindi ecco un codice.",
-      "cancel_unsettled": "Impossibile annullare l’accesso. È ancora in corso: premi di nuovo la stessa opzione per riprovare."
+      "cancel_unsettled": "Impossibile annullare l’accesso. È ancora in corso: premi di nuovo la stessa opzione per riprovare.",
+      "card_intro": "Gli agenti vengono eseguiti con questo account Kiro, senza dipendere da un accesso kiro-cli."
     },
     "kiroPrerequisiteGate": {
       "agent_specs_missing": "Specifiche degli agenti mancanti",
@@ -9352,7 +9353,9 @@
         "pick_model_hint": "Apri il selettore dei modelli, scegli uno dei modelli che il tuo account può usare e invia di nuovo il messaggio.",
         "both_hint": "Fai entrambe le cose: “{{pick}}” sistema questa sessione, “{{default}}” evita che le nuove sessioni partano con lo stesso modello se è impostato come predefinito. Poi invia di nuovo il messaggio.",
         "elsewhere_hint": "Il selettore dei modelli e Impostazioni → Chat sono nella finestra principale della chat. Aprila per scegliere un modello e cambiare quello predefinito.",
-        "elsewhere_settings_hint": "Impostazioni → Chat è nella finestra principale della chat. Aprila per cambiare il modello predefinito."
+        "elsewhere_settings_hint": "Impostazioni → Chat è nella finestra principale della chat. Aprila per cambiare il modello predefinito.",
+        "sign_in": "Accedi a Kiro",
+        "sign_in_hint": "Apri Impostazioni → Panoramica → Accesso a Kiro, accedi di nuovo e reinvia il messaggio."
       },
       "folderPanel": {
         "clear_search": "Cancella ricerca",
@@ -14122,6 +14125,25 @@
         "tokens_count_other": "{{count}} token di accesso",
         "tokens_count_many": "{{count}} token di accesso",
         "could_not_read_webhook_status": "Impossibile leggere lo stato del webhook — verifica che il gateway sia in esecuzione"
+      },
+      "kiroSignInCard": {
+        "title": "Accesso a Kiro",
+        "registry_description": "Accedi all’account Kiro con cui vengono eseguiti i tuoi agenti, oppure esci.",
+        "checking": "Verifica dell’accesso…",
+        "signed_in_with": "Accesso effettuato con {{provider}}",
+        "signed_in_body": "Gli agenti vengono eseguiti con questo account Kiro. Il token di accesso viene rinnovato automaticamente.",
+        "access_token_expires": "Il token di accesso scade {{when}} ({{at}}).",
+        "expired_renews_on_next_use": "Il token di accesso è scaduto e verrà rinnovato la prossima volta che un agente ne avrà bisogno.",
+        "expired_no_refresh": "Il token di accesso è scaduto e non c’è nulla con cui rinnovarlo.",
+        "refresh_rejected": "Kiro ha rifiutato di rinnovare questo accesso.",
+        "sign_in_expired": "Accesso scaduto",
+        "sign_in_expired_body": "L’accesso con {{provider}} non è più valido. Gli agenti segnaleranno di non aver effettuato l’accesso finché non accedi di nuovo: nessun ritorno automatico a un accesso kiro-cli.",
+        "sign_in_again": "Accedi di nuovo",
+        "switch_account": "Cambia account",
+        "sign_out": "Esci",
+        "takes_effect_next_process": "Si applica ai processi agente avviati da ora in avanti; le sessioni in corso lo adottano al turno successivo.",
+        "could_not_sign_out": "Impossibile uscire",
+        "keep_current_sign_in": "Mantieni l’accesso attuale"
       }
     },
     "settingsPage": {

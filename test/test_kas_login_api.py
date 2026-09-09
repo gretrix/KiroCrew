@@ -70,7 +70,17 @@ class _StubService(KasLoginService):
 
     async def status(self):
         self.calls.append("status")
-        return {"authenticated": False, "provider": "", "identity": "", "transport": "device"}
+        return {
+            "authenticated": False,
+            "provider": "",
+            "identity": "",
+            "transport": "device",
+            "expires_at": None,
+            "expired": False,
+            "has_refresh_token": False,
+            "refresh_rejected": False,
+            "usable": False,
+        }
 
     async def begin_device(self, provider_str, *, start_url="", region=""):
         self.calls.append(("begin", provider_str))
@@ -148,7 +158,12 @@ async def test_all_handlers_503_with_code_when_service_unavailable(monkeypatch):
 async def test_status_ok():
     resp = await api_kas_login_status(_FakeRequest(_StubService()))
     assert resp.status == 200
-    assert _body(resp)["transport"] == "device"
+    body = _body(resp)
+    assert body["transport"] == "device"
+    # The usability fields the sign-in card renders are passed through as the
+    # service answers them -- the handler adds nothing and hides nothing.
+    for key in ("expires_at", "expired", "has_refresh_token", "refresh_rejected", "usable"):
+        assert key in body
 
 
 async def test_begin_device_ok():
