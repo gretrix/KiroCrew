@@ -2455,8 +2455,14 @@ wake-in-flight refusal, so an unfinished correlation is never orphaned.
 A preserved record is not permanent: the owner ends it by CLEARING it, which is
 what `DELETE /api/autonudge/{loop_id}` does once the monitor is already terminal
 (`authorize_and_clear_monitor` — owner-gated, audited as `monitor_clear`, and
-refusing a live monitor, a future-version record, and a wake in flight). That is
-the only route that removes the row, so it is the one the re-arm refusal names;
+refusing a live monitor, a future-version record, and a wake in flight). The
+removal itself re-takes those checks inside the service's own lock hold
+(`clear_terminal_monitor`), because the audit yields the event loop and a
+close-rollback restore landing in that window must not be deleted. The route
+also accepts an optional `intent=stop|clear` and 409s on a mismatch, so the
+verb's meaning comes from the label the user pressed rather than from whatever
+state the record happened to reach in flight. That is the only route that
+removes the row, so it is the one the re-arm refusal names;
 `POST /api/monitors/{id}/restart` revives the SAME subject and therefore cannot
 free the session to watch a different one.
 Create-only directives cannot silently replace an active

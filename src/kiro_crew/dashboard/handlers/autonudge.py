@@ -885,6 +885,24 @@ async def api_autonudge_delete(request: web.Request) -> web.Response:
         # ``stop_monitor`` returns an already-terminal loop unchanged and this
         # route answered ``ok`` having removed nothing.
         clearing = monitor is not None and monitor.outcome is not None
+        # The client's INTENT, from the label the user actually pressed. Without
+        # it the meaning of this verb is decided purely by server state, so a
+        # press meant as "stop the loop" on a popover rendered a moment earlier
+        # would silently CLEAR a record that reached a terminal state in between
+        # -- destroying deliberately retained evidence the live-monitor refusal
+        # exists to protect. Optional, because an older bundle sends nothing and
+        # must keep working; supplied, it is a precondition rather than a hint.
+        intent = request.query.get("intent", "")
+        if intent not in ("", "stop", "clear"):
+            return _monitor_error(
+                "intent must be 'stop' or 'clear'", "monitor_intent_invalid", status=400
+            )
+        if intent and intent != ("clear" if clearing else "stop"):
+            return _monitor_error(
+                "the automation's state changed since this control was rendered; reopen it",
+                "monitor_intent_mismatch",
+                status=409,
+            )
         operation = "monitor_clear" if clearing else "monitor_stop"
         denied = await _require_monitor_owner(request, operation)
         if denied is not None:
@@ -899,7 +917,7 @@ async def api_autonudge_delete(request: web.Request) -> web.Response:
             )
             if error is not None:
                 return _monitor_error(error, "monitor_clear_denied", status=status)
-            return web.json_response({"ok": True, "cleared": True})
+            return web.json_response({"ok": True})
         _stopped, error, status = await authorize_and_stop_monitor(
             svc=svc,
             loop_id=loop_id,

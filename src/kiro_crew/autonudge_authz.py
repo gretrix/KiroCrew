@@ -287,7 +287,13 @@ async def authorize_and_clear_monitor(
         return False, error, 409
     if not await _audit("invoked"):
         return False, "audit log unavailable — monitor not cleared", 503
-    await svc.remove(loop_id)
+    # The checks above were taken BEFORE the audit's ``to_thread`` yielded, so
+    # they are re-taken atomically inside the removal's own lock hold: a
+    # concurrent close-rollback restore in that window must not be deleted.
+    if not await svc.clear_terminal_monitor(loop_id):
+        error = "monitor changed before the clear committed"
+        await _audit("denied", error)
+        return False, error, 409
     return True, None, 200
 
 

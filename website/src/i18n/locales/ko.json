@@ -5498,7 +5498,6 @@
       "goal_description": "목표 설명",
       "goal_interrupted_cycle": "목표 루프 대기 중 (주기 {{cycle}}) — 이전 턴이 중단되었습니다. 채팅을 재개하거나 다음 주기를 기다리세요",
       "last_fire": "마지막 실행:",
-      "loop_paused": "일시중지됨",
       "max_cycles_0": "최대 주기 (0 = ∞)",
       "max_cycles_0_infinite": "최대 주기 (0 = 무제한)",
       "never": "없음",
@@ -5516,7 +5515,9 @@
       "watches_next": "다음",
       "watches_note": "실제 신호가 있을 때만 에이전트를 깨웁니다. 스케줄 페이지에서 관리하세요.",
       "watches_title": "토큰을 쓰지 않는 감시",
-      "clear_record": "기록 삭제"
+      "clear_stopped_goal": "중지된 목표 삭제",
+      "loop_stopped": "중지됨",
+      "stopped_help": "루프 시작으로 이 목표를 다시 실행합니다. 중지된 목표 삭제는 영구히 지웁니다."
     },
     "bottomTerminalPanel": {
       "close_terminal": "터미널 닫기",

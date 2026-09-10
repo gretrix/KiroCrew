@@ -5591,7 +5591,6 @@
       "goal_description": "Zielbeschreibung",
       "goal_interrupted_cycle": "Zielschleife bereit (Zyklus {{cycle}}) – letzter Zug wurde unterbrochen; Chat fortsetzen oder auf den nächsten Zyklus warten",
       "last_fire": "Letzte Auslösung:",
-      "loop_paused": "Pausiert",
       "max_cycles_0": "Max. Zyklen (0 = ∞)",
       "max_cycles_0_infinite": "Max. Zyklen (0 = unbegrenzt)",
       "never": "nie",
@@ -5609,7 +5608,9 @@
       "watches_next": "nächste",
       "watches_note": "Sie wecken den Agenten nur bei einem echten Signal. Verwaltung auf der Seite „Zeitplan“.",
       "watches_title": "Überwachungen ohne Tokenverbrauch",
-      "clear_record": "Eintrag löschen"
+      "clear_stopped_goal": "Gestopptes Ziel löschen",
+      "loop_stopped": "Gestoppt",
+      "stopped_help": "Schleife starten setzt dieses Ziel fort. Gestopptes Ziel löschen entfernt es endgültig."
     },
     "bottomTerminalPanel": {
       "close_terminal": "Terminal schließen",

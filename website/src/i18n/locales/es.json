@@ -5684,7 +5684,6 @@
       "goal_description": "Descripción del objetivo",
       "goal_interrupted_cycle": "Bucle de objetivo armado (ciclo {{cycle}}) — el último turno se interrumpió; reanuda el chat o espera al siguiente ciclo",
       "last_fire": "Última ejecución:",
-      "loop_paused": "En pausa",
       "max_cycles_0": "Ciclos máximos (0 = ∞)",
       "max_cycles_0_infinite": "Ciclos máximos (0 = infinito)",
       "never": "nunca",
@@ -5702,7 +5701,9 @@
       "watches_next": "siguiente",
       "watches_note": "Solo despiertan al agente ante una señal real. Gestiónalas en la página Programación.",
       "watches_title": "Vigilancias sin consumo de tokens",
-      "clear_record": "Borrar registro"
+      "clear_stopped_goal": "Borrar objetivo detenido",
+      "loop_stopped": "Detenido",
+      "stopped_help": "Iniciar bucle reanuda este objetivo. Borrar objetivo detenido lo elimina definitivamente."
     },
     "bottomTerminalPanel": {
       "close_terminal": "Cerrar la terminal",

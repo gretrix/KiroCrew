@@ -1556,8 +1556,9 @@
       "start_loop": "Start loop",
       "trigger_nudge": "Trigger nudge",
       "watches_load_failed": "Couldn't load this session's watches.",
-      "loop_paused": "Paused",
-      "clear_record": "Clear record"
+      "clear_stopped_goal": "Clear stopped goal",
+      "loop_stopped": "Stopped",
+      "stopped_help": "Start loop resumes this goal. Clear stopped goal removes it for good."
     },
     "bottomTerminalPanel": {
       "close_failed": "Couldn't stop this terminal's shell on the server. It will be cleaned up automatically.",

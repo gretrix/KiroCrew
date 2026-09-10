@@ -5498,7 +5498,6 @@
       "goal_description": "目标描述",
       "goal_interrupted_cycle": "目标循环待命（第 {{cycle}} 轮）— 上一轮被中断；恢复聊天或等待下一轮",
       "last_fire": "上次触发：",
-      "loop_paused": "已暂停",
       "max_cycles_0": "最大轮次（0 = ∞）",
       "max_cycles_0_infinite": "最大轮次（0 = 无限）",
       "never": "从不",
@@ -5516,7 +5515,9 @@
       "watches_next": "下次",
       "watches_note": "只在出现真实信号时唤醒智能体。可在“计划”页面管理。",
       "watches_title": "零 token 监视",
-      "clear_record": "清除记录"
+      "clear_stopped_goal": "清除已停止的目标",
+      "loop_stopped": "已停止",
+      "stopped_help": "启动循环可继续这个目标；清除已停止的目标会永久删除它。"
     },
     "bottomTerminalPanel": {
       "close_terminal": "关闭终端",

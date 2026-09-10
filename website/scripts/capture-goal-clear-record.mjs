@@ -14,10 +14,12 @@
  *   1. live loop    -> "Stop loop". Unchanged behaviour, photographed so the
  *                      new label is proven to be conditional rather than a
  *                      rename of the only state.
- *   2. stopped loop -> "Clear record", and pressing it really issues the DELETE
- *                      and tears the popover down. A still of a label cannot
- *                      show that the press does anything, so the press is
- *                      performed and its request observed.
+ *   2. stopped loop -> "Clear stopped goal", the status reading "Stopped", a
+ *                      help line naming both exits, and a press that really
+ *                      issues the DELETE (carrying its intent) and tears the
+ *                      popover down. A still of a label cannot show that the
+ *                      press does anything, so the press is performed and its
+ *                      request observed.
  *
  * This ASSERTS as well as photographs, because a PNG cannot fail. It drives the
  * REAL built SPA (website/dist) behind `serveDist` with every /api/** call
@@ -48,11 +50,13 @@ const LOCALES = fileURLToPath(new URL('../src/i18n/locales/', import.meta.url))
 const manual = JSON.parse(readFileSync(LOCALES + 'en.manual.json', 'utf-8'))
 const gen = JSON.parse(readFileSync(LOCALES + 'en.json', 'utf-8'))
 const STOP = gen.components.autoNudgePopover.stop_loop
-const CLEAR = manual.components.autoNudgePopover.clear_record
+const CLEAR = manual.components.autoNudgePopover.clear_stopped_goal
+const STOPPED = manual.components.autoNudgePopover.loop_stopped
+const STOPPED_HELP = manual.components.autoNudgePopover.stopped_help
 const SAVE = manual.components.autoNudgePopover.save
 const START = manual.components.autoNudgePopover.start_loop
-if (!STOP || !CLEAR || !SAVE || !START) {
-  throw new Error('components.autoNudgePopover stop/clear/save/start keys missing -- renamed?')
+if (!STOP || !CLEAR || !SAVE || !START || !STOPPED || !STOPPED_HELP) {
+  throw new Error('components.autoNudgePopover stop/clear/save/start/stopped keys missing -- renamed?')
 }
 
 const NOW = Math.floor(Date.now() / 1000)
@@ -116,8 +120,9 @@ async function load(loop) {
 
   const extra = async (path, route) => {
     if (path === `/api/autonudge/${LOOP_ID}` && route.request().method() === 'DELETE') {
-      deletes.push(path)
-      await json(route, { ok: true, cleared: true })
+      // The full URL, so the frame proves the pressed INTENT travelled with it.
+      deletes.push(route.request().url().replace(base, ''))
+      await json(route, { ok: true })
       return true
     }
     if (path === `/api/autonudge/slot/${SLOT}`) { await json(route, { loop }); return true }
@@ -175,6 +180,8 @@ async function shoot(popover, name) {
     `"${CLEAR}" offered on a LIVE loop, where the press stops it and keeps the record`)
   check('01 primary reads Save', (await popover.getByRole('button', { name: SAVE }).count()) === 1,
     `"${SAVE}" not found in the same frame`)
+  check('01 no stopped help line', (await popover.getByTestId('auto-nudge-stopped-help').count()) === 0,
+    'the stopped help line renders on a LIVE loop, where nothing has stopped')
   await page.close()
 }
 
@@ -194,12 +201,21 @@ async function shoot(popover, name) {
     'the popover did not render a stopped loop, so the label proves nothing')
   check('02 primary offers the way back', (await popover.getByRole('button', { name: START }).count()) === 1,
     `"${START}" missing -- a stopped loop must still show how to resume`)
+  // The status must not read as resumable-only next to an erase control, and the
+  // erase has no undo, so the surface has to say what each exit does.
+  const statusText = await popover.getByTestId('auto-nudge-loop-paused').innerText()
+  check('02 the status reads Stopped', statusText.trim() === STOPPED,
+    `the status line reads ${JSON.stringify(statusText)}, want ${JSON.stringify(STOPPED)}`)
+  const helpText = await popover.getByTestId('auto-nudge-stopped-help').innerText()
+  check('02 both exits are named', helpText.trim() === STOPPED_HELP,
+    `the help line reads ${JSON.stringify(helpText)}, want ${JSON.stringify(STOPPED_HELP)}`)
 
   // A label is not the fix. Press it and observe the request.
   await popover.getByRole('button', { name: CLEAR }).click()
   await page.waitForTimeout(900)
-  check('02 the press issues the DELETE', deletes.length === 1,
-    `the press sent ${deletes.length} DELETE(s) to /api/autonudge/${LOOP_ID}, want 1`)
+  check('02 the press issues the DELETE with its intent',
+    deletes.length === 1 && deletes[0] === `/api/autonudge/${LOOP_ID}?intent=clear`,
+    `the press sent ${JSON.stringify(deletes)}, want one /api/autonudge/${LOOP_ID}?intent=clear`)
   check('02 the popover closed on success', !(await popover.isVisible()),
     'the popover stayed open after a successful clear, so nothing says the record is gone')
   await page.close()
