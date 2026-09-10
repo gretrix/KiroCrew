@@ -18,6 +18,7 @@ const GATEWAY_SOURCE = fs.readFileSync(
 
 const SHELL_HANDLES = [
   "app-menu:items",
+  "browser:annotate",
   "browser:close",
   "browser:control",
   "browser:get-control",
@@ -320,6 +321,7 @@ function harness({
     "setControlOwner",
     "getControl",
     "control",
+    "annotate",
   ]) {
     windows.browser[name] = recordWindow(`browser.${name}`, { from: `browser.${name}` });
   }
@@ -542,6 +544,7 @@ test("shell handlers preserve sender, argument, and return shapes", async () => 
     ["browser:set-control-owner", "setControlOwner", ["panel", "agent"]],
     ["browser:get-control", "getControl", ["panel"]],
     ["browser:control", "control", ["panel", "click", { x: 4 }]],
+    ["browser:annotate", "annotate", ["panel", "poll", {}]],
   ];
   for (const [channel, owner, args] of browserCases) {
     const result = await h.handlers.get(channel)(event, ...args);

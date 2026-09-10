@@ -754,4 +754,114 @@ describe('WebPreviewPanel — native browser transport', () => {
     unmount()
     await waitFor(() => expect(api.close).toHaveBeenCalledWith('sess-1'))
   })
+
+  // ── Annotate: element notes on the live page ──
+  // The overlay lives in the page; the panel mirrors it through the bridge's
+  // `annotate` op. These assert the mirror + hand-off, never pixels.
+
+  const ITEM = {
+    id: 1, n: 1, note: 'too far right', ref: 'e12', tag: 'button', role: 'button', name: 'Save', text: 'Save',
+    selector: 'form > footer > button.primary', rect: { x: 1, y: 2, width: 3, height: 4 }, detached: false,
+  }
+  function installAnnotateBridge(items: typeof ITEM[] = []) {
+    const api = installNativeBridge(true, 'https://example.com/settings') as Record<string, unknown>
+    const state = { items, picking: true }
+    const annotate = vi.fn(async (_p: string, op: string, args?: Record<string, unknown>) => {
+      switch (op) {
+        case 'start': return { ok: true, url: 'https://example.com/settings', title: 'Settings' }
+        case 'poll': return { ok: true, picking: state.picking, editing: false, url: 'https://example.com/settings', title: 'Settings', items: state.items, events: [] }
+        case 'stop': state.picking = false; return { ok: true }
+        case 'remove': state.items = state.items.filter(i => i.id !== args?.id); return { ok: true }
+        case 'clear': state.items = []; return { ok: true }
+        case 'capture': return { ok: true, png: btoa('png'), width: 20, height: 10, cssWidth: 10, cssHeight: 5, dpr: 2, url: 'https://example.com/settings', title: 'Settings', items: state.items }
+        default: return { ok: true }
+      }
+    })
+    api.annotate = annotate
+    return { api, annotate, state }
+  }
+
+  it('shows Annotate only when a native view is open AND the shell exposes the annotate bridge', async () => {
+    installAnnotateBridge()
+    const { unmount } = renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+    expect(await screen.findByTestId('browser-annotate')).toHaveTextContent('Annotate')
+    unmount()
+    installNativeBridge(true) // older shell: no `annotate`
+    renderWithProviders(<WebPreviewPanel sessionKey="sess-2" active />)
+    await waitFor(() => expect(screen.queryByTitle('Live browser session')).toBeNull())
+    expect(screen.queryByTestId('browser-annotate')).toBeNull()
+  })
+
+  it('clicking Annotate starts pick mode with localized editor labels, flips to Done, and Done stops', async () => {
+    const { annotate } = installAnnotateBridge()
+    renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+    fireEvent.click(await screen.findByTestId('browser-annotate'))
+    await waitFor(() => expect(annotate).toHaveBeenCalledWith('sess-1', 'start', expect.objectContaining({
+      labels: expect.objectContaining({ placeholder: expect.any(String), save: expect.any(String), remove: expect.any(String) }),
+    })))
+    await waitFor(() => expect(screen.getByTestId('browser-annotate')).toHaveTextContent('Done'))
+    expect(screen.getByTestId('browser-annotate')).toHaveAttribute('aria-pressed', 'true')
+    // Empty state explains the gesture while nothing has been picked yet.
+    expect(await screen.findByTestId('browser-annotations')).toHaveTextContent(/Click an element on the page/)
+    fireEvent.click(screen.getByTestId('browser-annotate'))
+    await waitFor(() => expect(annotate).toHaveBeenCalledWith('sess-1', 'stop', undefined))
+  })
+
+  it('mirrors the notes typed on the page: N · tag "label" · note, with per-row edit/remove', async () => {
+    const { annotate, state } = installAnnotateBridge()
+    renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+    fireEvent.click(await screen.findByTestId('browser-annotate'))
+    await screen.findByTestId('browser-annotations')
+    state.items = [ITEM, { ...ITEM, id: 2, n: 2, ref: 'e4', tag: 'input', role: 'textbox', name: 'Search', text: '', note: 'change placeholder' }]
+    await waitFor(() => expect(screen.getByTestId('browser-annotations')).toHaveTextContent('2 annotations'))
+    const rows = screen.getByTestId('browser-annotations').querySelectorAll('li')
+    expect(rows[0]).toHaveTextContent('button "Save"')
+    expect(rows[0]).toHaveTextContent('too far right')
+    expect(rows[1]).toHaveTextContent('input "Search"')
+    fireEvent.click(screen.getByRole('button', { name: 'Edit note 1' }))
+    await waitFor(() => expect(annotate).toHaveBeenCalledWith('sess-1', 'edit', { id: 1 }))
+    fireEvent.click(screen.getByRole('button', { name: 'Remove note 2' }))
+    await waitFor(() => expect(annotate).toHaveBeenCalledWith('sess-1', 'remove', { id: 2 }))
+    await waitFor(() => expect(screen.getByTestId('browser-annotations')).toHaveTextContent('1 annotation'))
+  })
+
+  it('Send to chat captures the page with markers and hands ChatPage a draft + the PNG for THIS slot; notes stay', async () => {
+    const { annotate } = installAnnotateBridge([ITEM])
+    const seen: CustomEvent[] = []
+    const onEv = (e: Event) => { seen.push(e as CustomEvent) }
+    window.addEventListener('kirocrew-web-preview-annotate', onEv)
+    try {
+      renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+      fireEvent.click(await screen.findByTestId('browser-annotate'))
+      const send = await screen.findByTestId('browser-annotations-send')
+      await waitFor(() => expect(send).not.toBeDisabled())
+      fireEvent.click(send)
+      await waitFor(() => expect(seen).toHaveLength(1))
+      const d = seen[0].detail as { slot: string; files: File[]; draft: string }
+      expect(d.slot).toBe('sess-1')
+      expect(d.files).toHaveLength(1)
+      expect(d.files[0].name).toMatch(/^browser-annotations-.+\.png$/)
+      expect(d.draft.split('\n')[0]).toBe('Annotations on Settings (https://example.com/settings):')
+      expect(d.draft).toContain('1. [button "Save"] (e12, `form > footer > button.primary`) -- too far right')
+      expect(d.draft).toContain(d.files[0].name)
+      expect(annotate).toHaveBeenCalledWith('sess-1', 'capture', undefined)
+      // Sending leaves pick mode but keeps the list: the user may add more and send again.
+      await waitFor(() => expect(annotate).toHaveBeenCalledWith('sess-1', 'stop', undefined))
+      expect(screen.getByTestId('browser-annotations')).toHaveTextContent('too far right')
+    } finally {
+      window.removeEventListener('kirocrew-web-preview-annotate', onEv)
+    }
+  })
+
+  it('drops the session when the page navigated away (poll finds no overlay)', async () => {
+    const { annotate } = installAnnotateBridge([ITEM])
+    renderWithProviders(<WebPreviewPanel sessionKey="sess-1" active />)
+    fireEvent.click(await screen.findByTestId('browser-annotate'))
+    await screen.findByTestId('browser-annotations')
+    annotate.mockImplementation(async (_p: string, op: string) => op === 'poll'
+      ? { ok: false, code: 'no_overlay', error: 'no annotate overlay on this page' }
+      : { ok: true })
+    await waitFor(() => expect(screen.queryByTestId('browser-annotations')).toBeNull())
+    expect(screen.getByTestId('browser-annotate')).toHaveTextContent('Annotate')
+  })
 })

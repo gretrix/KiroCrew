@@ -222,14 +222,14 @@ function normalizeConsoleEvent(method, params) {
 // ── Page-side expressions (injected via Runtime.evaluate, returnByValue) ─────
 
 /**
- * The snapshot walker. Injected into the page; maintains `window.__kcRefs`
- * (ref → element), `window.__kcRefSeq` (monotonic), `window.__kcRefDoc`, and
- * returns `{ url, title, nodes }`. The map is rebuilt when the document URI
- * changes so navigation invalidates old refs. Walks the document plus OPEN
- * shadow roots, skips invisible elements, and refs only interactive elements
- * (headings/meaningful text emit ref-less structural lines).
+ * Page-side helpers shared by the snapshot walker and the annotate overlay
+ * (browser-annotate.js): the ref map (`window.__kcRefs`, reset on navigation),
+ * `assignRef` (mint once per element, reuse forever -- so a ref minted by one
+ * consumer is the same ref every other consumer sees), the accessible-name and
+ * role heuristics, visibility, and a short CSS-selector hint. A FUNCTION BODY
+ * fragment: splice it into an IIFE, never evaluate it alone.
  */
-const WALKER_SOURCE = `(() => {
+const PAGE_HELPERS_SOURCE = `
   var CAP = ${NAME_CAP};
   var INTERACTIVE_TAGS = { a: true, button: true, input: true, select: true, textarea: true };
   var INTERACTIVE_ROLES = { button:1, link:1, checkbox:1, radio:1, tab:1, menuitem:1, option:1, "switch":1, combobox:1, textbox:1 };
@@ -361,6 +361,50 @@ const WALKER_SOURCE = `(() => {
     return r;
   }
 
+
+  // A short, human-readable CSS selector for the element -- a hint for a
+  // reader, NOT a stable handle (the ref is). Prefers the id, then a labelled
+  // tag, then a shallow nth-of-type path.
+  function selectorOf(el) {
+    try {
+      var esc = function (s) { return window.CSS && CSS.escape ? CSS.escape(s) : s; };
+      if (el.id) return "#" + esc(el.id);
+      var tag = el.tagName.toLowerCase();
+      var attrs = ["data-testid", "name", "aria-label"];
+      for (var i = 0; i < attrs.length; i++) {
+        var v = el.getAttribute(attrs[i]);
+        if (v && v.length <= 60) return tag + "[" + attrs[i] + "=\\"" + v.replace(/"/g, "\\\\\\"") + "\\"]";
+      }
+      var parts = [];
+      var cur = el;
+      for (var d = 0; cur && cur.nodeType === 1 && d < 4; d++) {
+        var t = cur.tagName.toLowerCase();
+        if (cur.id) { parts.unshift("#" + esc(cur.id)); break; }
+        var p = cur.parentElement;
+        if (!p) { parts.unshift(t); break; }
+        var same = 0, idx = 0;
+        for (var k = 0; k < p.children.length; k++) {
+          if (p.children[k].tagName === cur.tagName) { same++; if (p.children[k] === cur) idx = same; }
+        }
+        parts.unshift(same > 1 ? t + ":nth-of-type(" + idx + ")" : t);
+        cur = p;
+      }
+      return parts.join(" > ");
+    } catch (e) {
+      return "";
+    }
+  }
+`;
+
+/**
+ * The snapshot walker. Injected into the page; maintains `window.__kcRefs`
+ * (ref → element), `window.__kcRefSeq` (monotonic), `window.__kcRefDoc`, and
+ * returns `{ url, title, nodes }`. The map is rebuilt when the document URI
+ * changes so navigation invalidates old refs. Walks the document plus OPEN
+ * shadow roots, skips invisible elements, and refs only interactive elements
+ * (headings/meaningful text emit ref-less structural lines).
+ */
+const WALKER_SOURCE = `(() => {${PAGE_HELPERS_SOURCE}
   var out = [];
   function emit(el, depth) {
     var role = roleFor(el);
@@ -910,6 +954,7 @@ function createBrowserOps(deps) {
 
 module.exports = {
   WIRE_OPS,
+  PAGE_HELPERS_SOURCE,
   NAME_CAP,
   CONSOLE_CAP,
   isValidRef,

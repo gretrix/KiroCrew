@@ -1,11 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Globe, RotateCw, ExternalLink, ArrowLeft, ArrowRight, Expand, Minimize, Smartphone, Monitor, Check, Crop, Play, Loader2, AlertTriangle, MoreHorizontal } from 'lucide-react'
+import { Globe, RotateCw, ExternalLink, ArrowLeft, ArrowRight, Expand, Minimize, Smartphone, Monitor, Check, Crop, Play, Loader2, AlertTriangle, MoreHorizontal, MousePointerClick, Pencil, X, Send } from 'lucide-react'
 
 import {
   DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem,
   DropdownMenuSub, DropdownMenuSubTrigger, DropdownMenuSubContent, DropdownMenuSeparator,
 } from './ui/dropdown-menu'
 import { safeSetItem } from '../utils/safeStorage'
+import {
+  PREVIEW_ANNOTATE_EVENT, annotationScreenshotFile, annotationStamp, describeAnnotationTarget,
+  type PreviewAnnotateDetail,
+} from '../utils/browserAnnotations'
+import { formatAnnotationDraft } from '../utils/browserAnnotations.prompt'
 import { isScreenSnipSupported } from '../hooks/useScreenSnip'
 import { useIsMobile } from '../hooks/useIsMobile'
 import { useBrowserView } from '../hooks/useBrowserView'
@@ -469,6 +474,151 @@ export default function WebPreviewPanel({ sessionKey, active = true }: { session
     setViewOverride(v => !(v ?? viewRunning))
   }, [viewRunning])
 
+  // ── Annotate: element notes on the live page ──────────────────────────────
+  // The user points at elements IN the native page (hover highlight, click to
+  // select, type a note, Enter). That surface is an overlay injected into the
+  // page by the main process, because the native view is composited above
+  // this DOM; the panel only mirrors its state by polling while a session is
+  // alive and renders the list + Send/Clear. Native-only by construction: the
+  // remote/CLI transport has no in-process view to inject into, so the button
+  // is not rendered there.
+  const annotateBridge = window.browserAPI?.annotate
+  const canAnnotate = nativeOpen && typeof annotateBridge === 'function'
+  /** An overlay session is alive on the page (poll it). */
+  const [annotateOn, setAnnotateOn] = useState(false)
+  const [picking, setPicking] = useState(false)
+  const [annotations, setAnnotations] = useState<BrowserAnnotation[]>([])
+  const [annotateBusy, setAnnotateBusy] = useState(false)
+  const [annotateError, setAnnotateError] = useState('')
+  const annotatePage = useRef({ url: '', title: '' })
+  /** Last serialized item list, so a poll that changed nothing does not re-render. */
+  const annotateSig = useRef('')
+
+  const callAnnotate = useCallback(async (op: BrowserAnnotateOp, args?: Record<string, unknown>) => {
+    if (!sessionKey || typeof annotateBridge !== 'function') return null
+    return annotateBridge(sessionKey, op, args)
+  }, [annotateBridge, sessionKey])
+
+  const resetAnnotate = useCallback(() => {
+    setAnnotateOn(false)
+    setPicking(false)
+    setAnnotations([])
+    annotateSig.current = ''
+    annotatePage.current = { url: '', title: '' }
+  }, [])
+
+  /** Toggle pick mode. First use installs the overlay and starts polling. */
+  const toggleAnnotate = useCallback(async () => {
+    if (annotateBusy) return
+    setAnnotateError('')
+    if (annotateOn && picking) {
+      await callAnnotate('stop')
+      setPicking(false)
+      return
+    }
+    const res = await callAnnotate('start', {
+      // Labels for the in-page editor, localized here: the page has no catalog.
+      labels: {
+        placeholder: i18nT('components.webPreviewPanel.annotate_note_placeholder'),
+        save: i18nT('components.webPreviewPanel.annotate_save'),
+        remove: i18nT('components.webPreviewPanel.annotate_remove'),
+      },
+    })
+    if (!res || !res.ok) {
+      setAnnotateError((res && 'error' in res && res.error) || i18nT('components.webPreviewPanel.annotate_failed'))
+      return
+    }
+    if ('url' in res) annotatePage.current = { url: res.url ?? '', title: res.title ?? '' }
+    setAnnotateOn(true)
+    setPicking(true)
+  }, [annotateBusy, annotateOn, picking, callAnnotate])
+
+  // Mirror the overlay while a session is alive. The overlay lives in the
+  // page, so the notes the user types there reach this list only by asking;
+  // 150ms keeps the list feeling live without measurable cost (one tiny
+  // executeJavaScript per tick). A poll that finds no overlay means the page
+  // navigated (the document took the overlay with it): drop the session.
+  useEffect(() => {
+    if (!annotateOn || !canAnnotate) return
+    let stopped = false
+    const tick = async () => {
+      const res = await callAnnotate('poll')
+      if (stopped) return
+      if (!res || !res.ok || !('items' in res)) {
+        resetAnnotate()
+        return
+      }
+      setPicking(res.picking)
+      annotatePage.current = { url: res.url, title: res.title }
+      const sig = JSON.stringify(res.items)
+      if (sig !== annotateSig.current) {
+        annotateSig.current = sig
+        setAnnotations(res.items)
+      }
+    }
+    void tick()
+    const t = setInterval(() => { void tick() }, 150)
+    return () => {
+      stopped = true
+      clearInterval(t)
+    }
+  }, [annotateOn, canAnnotate, callAnnotate, resetAnnotate])
+
+  // Losing the native view (transport switch, panel close) or changing
+  // session ends the overlay session; the page keeps nothing of ours.
+  useEffect(() => {
+    if (canAnnotate) return
+    if (annotateOn) resetAnnotate()
+  }, [canAnnotate, annotateOn, resetAnnotate])
+  useEffect(() => () => {
+    if (sessionKey && typeof annotateBridge === 'function') void annotateBridge(sessionKey, 'teardown')
+  }, [sessionKey, annotateBridge])
+
+  useEffect(() => {
+    if (!annotateError) return
+    const t = setTimeout(() => setAnnotateError(''), 6000)
+    return () => clearTimeout(t)
+  }, [annotateError])
+
+  const removeAnnotation = useCallback((id: number) => { void callAnnotate('remove', { id }) }, [callAnnotate])
+  const editAnnotation = useCallback((id: number) => { void callAnnotate('edit', { id }) }, [callAnnotate])
+  const clearAnnotations = useCallback(() => { void callAnnotate('clear') }, [callAnnotate])
+
+  /** Send: screenshot with the markers + the numbered draft, both into the
+   *  composer of THIS session (draft is not sent). Notes stay on the page so
+   *  the user can keep adding and send again. */
+  const sendAnnotations = useCallback(async () => {
+    if (annotateBusy || !annotations.length) return
+    setAnnotateBusy(true)
+    setAnnotateError('')
+    try {
+      const cap = await callAnnotate('capture')
+      const files: File[] = []
+      let items = annotations
+      let page = annotatePage.current
+      let screenshotName: string | undefined
+      if (cap && cap.ok && 'png' in cap) {
+        const file = annotationScreenshotFile(cap.png, annotationStamp())
+        files.push(file)
+        screenshotName = file.name
+        items = cap.items
+        page = { url: cap.url, title: cap.title }
+      } else if (cap && !cap.ok) {
+        // The draft is still worth sending without the picture; say what failed.
+        setAnnotateError(cap.error || i18nT('components.webPreviewPanel.annotate_failed'))
+      }
+      const draft = formatAnnotationDraft(items, { url: page.url, title: page.title, screenshotName })
+      const detail: PreviewAnnotateDetail = { slot: sessionKey || '', files, draft }
+      window.dispatchEvent(new CustomEvent(PREVIEW_ANNOTATE_EVENT, { detail }))
+      await callAnnotate('stop')
+      setPicking(false)
+    } catch (e) {
+      setAnnotateError(e instanceof Error && e.message ? e.message : i18nT('components.webPreviewPanel.annotate_failed'))
+    } finally {
+      setAnnotateBusy(false)
+    }
+  }, [annotateBusy, annotations, callAnnotate, sessionKey])
+
   const persist = useCallback((u: string) => {
     if (storageKey && u) safeSetItem(storageKey, u)
   }, [storageKey])
@@ -816,6 +966,34 @@ export default function WebPreviewPanel({ sessionKey, active = true }: { session
         <span className="shrink-0 text-[13px] font-medium text-text">{i18nT('components.webPreviewPanel.browser_live')}</span>
         <span className="inline-block w-1.5 h-1.5 rounded-full" style={{ backgroundColor: 'var(--ok)' }} aria-hidden />
         <div className="flex-1" />
+        {annotateError && (
+          <span role="alert" className="text-[11px] text-danger truncate min-w-0 max-w-[260px]" title={annotateError}>
+            {annotateError}
+          </span>
+        )}
+        {/* Annotate: pick elements on the page and type a note on each. Lives
+            on the native header (which had no actions); the preview toolbar's
+            4-control row is untouched. Labelled, not icon-only: the verb is new
+            to users. While picking, the same button reads "Done" -- one control,
+            two states, so there is always a visible way out besides Esc. */}
+        {canAnnotate && (
+          <button
+            type="button"
+            onClick={() => { void toggleAnnotate() }}
+            disabled={annotateBusy}
+            aria-pressed={picking}
+            className={`inline-flex items-center gap-1.5 h-6 px-2 rounded-md text-[12px] font-medium border transition-colors cursor-pointer shrink-0 disabled:opacity-60 disabled:cursor-default ${
+              picking
+                ? 'text-accent bg-accent-subtle border-accent hover:bg-accent-subtle'
+                : 'text-text bg-transparent border-border hover:bg-bg-hover hover:border-border-strong'
+            }`}
+            title={picking ? i18nT('components.webPreviewPanel.annotate_done_tooltip') : i18nT('components.webPreviewPanel.annotate_tooltip')}
+            data-testid="browser-annotate"
+          >
+            <MousePointerClick size={13} aria-hidden />
+            <span>{picking ? i18nT('components.webPreviewPanel.annotate_done') : i18nT('components.webPreviewPanel.annotate')}</span>
+          </button>
+        )}
       </div>
       {/* Address bar. The preview subtree below (which owns the other URL form)
           is hidden while the native surface is up, so without this the user
@@ -852,6 +1030,80 @@ export default function WebPreviewPanel({ sessionKey, active = true }: { session
       </form>
       {/* Measured host for the native view. Empty by design. */}
       <div ref={native.hostRef} className="flex-1 min-h-0 bg-black" />
+      {/* Annotation list: mirrors the notes typed on the page. Below the view so
+          the address bar and the page stay together; the host above shrinks to
+          make room, which the bounds report picks up. Shown while a session is
+          alive (picking, or notes exist). */}
+      {annotateOn && (picking || annotations.length > 0) && (
+        <div className="shrink-0 border-t border-border" style={{ backgroundColor: 'var(--bg-elevated)' }} data-testid="browser-annotations">
+          <div className="flex items-center gap-2 px-3 py-1.5">
+            <span className="text-[12px] font-medium text-text">
+              {i18nT('components.webPreviewPanel.annotations_count', { count: annotations.length })}
+            </span>
+            <div className="flex-1" />
+            <button
+              type="button"
+              onClick={clearAnnotations}
+              disabled={!annotations.length || annotateBusy}
+              className="text-[12px] px-2 h-6 rounded-md border border-border text-muted hover:text-text hover:bg-bg-hover transition-colors cursor-pointer bg-transparent disabled:opacity-40 disabled:cursor-default"
+            >
+              {i18nT('components.webPreviewPanel.annotate_clear')}
+            </button>
+            <button
+              type="button"
+              onClick={() => { void sendAnnotations() }}
+              disabled={!annotations.length || annotateBusy}
+              className="inline-flex items-center gap-1.5 text-[12px] px-2.5 h-6 rounded-md bg-accent text-white hover:opacity-90 transition-opacity cursor-pointer border-none disabled:opacity-40 disabled:cursor-default"
+              title={i18nT('components.webPreviewPanel.annotate_send_tooltip')}
+              data-testid="browser-annotations-send"
+            >
+              {annotateBusy ? <Loader2 size={12} className="animate-spin" aria-hidden /> : <Send size={12} aria-hidden />}
+              {i18nT('components.webPreviewPanel.annotate_send')}
+            </button>
+          </div>
+          {annotations.length === 0 ? (
+            <div className="px-3 pb-2 text-[11px] text-muted leading-snug">
+              {i18nT('components.webPreviewPanel.annotate_empty_hint')}
+            </div>
+          ) : (
+            <ul className="m-0 p-0 list-none max-h-40 overflow-y-auto border-t border-border">
+              {annotations.map(a => (
+                <li key={a.id} className="flex items-center gap-2 px-3 py-1 border-b border-border last:border-b-0 text-[12px]">
+                  <span
+                    className="shrink-0 min-w-[18px] h-[18px] px-1.5 rounded-full text-[11px] font-semibold text-white text-center leading-[18px]"
+                    style={{ backgroundColor: '#e03131' }}
+                    aria-hidden
+                  >
+                    {a.n}
+                  </span>
+                  <span className="shrink-0 font-mono text-[11px] text-muted truncate max-w-[40%]" title={`${a.ref} · ${a.selector}`}>
+                    {describeAnnotationTarget(a)}
+                  </span>
+                  <span className="flex-1 min-w-0 truncate text-text" title={a.note}>{a.note}</span>
+                  <button
+                    type="button"
+                    onClick={() => editAnnotation(a.id)}
+                    className="flex items-center justify-center w-6 h-6 rounded text-muted hover:text-text hover:bg-bg-hover transition-colors bg-transparent border-none cursor-pointer shrink-0"
+                    title={i18nT('components.webPreviewPanel.annotate_edit_note')}
+                    aria-label={i18nT('components.webPreviewPanel.annotate_edit_note_n', { n: a.n })}
+                  >
+                    <Pencil size={12} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => removeAnnotation(a.id)}
+                    className="flex items-center justify-center w-6 h-6 rounded text-muted hover:text-danger hover:bg-bg-hover transition-colors bg-transparent border-none cursor-pointer shrink-0"
+                    title={i18nT('components.webPreviewPanel.annotate_remove')}
+                    aria-label={i18nT('components.webPreviewPanel.annotate_remove_n', { n: a.n })}
+                  >
+                    <X size={12} />
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      )}
     </div>
   )
 

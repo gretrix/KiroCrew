@@ -28,6 +28,7 @@ const {
   OWNER,
 } = require("./browser-control");
 const { createBrowserOps } = require("./browser-ops");
+const { runAnnotateOp } = require("./browser-annotate");
 const { createAgentCommandChannel } = require("./browser-agent-channel");
 const { attachContextMenu } = require("./context-menu");
 const { validateRemoteSettings } = require("./validation");
@@ -1861,6 +1862,15 @@ function createWindowLifecycle(options) {
     return dispatchBrowserOp(panel, op, args);
   }
 
+  // Human-initiated element annotation on the page the user is looking at.
+  // Served through executeJavaScript/capturePage, never the agent control
+  // plane: it needs no CDP owner and Browser Mode may be off. Closed op set.
+  async function browserAnnotate(sender, panelId, op, args) {
+    const panel = panelForSender(sender, panelId, { create: false });
+    if (!panel) return { ok: false, code: "no_view", error: "no native browser panel" };
+    return runAnnotateOp(panel.manager.getWebContents(), op, args);
+  }
+
   function recordMemorySample(sender, payload) {
     if (!mainWindow || mainWindow.isDestroyed()) return;
     if (sender !== mainWindow.webContents) return;
@@ -1942,6 +1952,7 @@ function createWindowLifecycle(options) {
       setControlOwner: browserSetControlOwner,
       getControl: browserGetControl,
       control: browserControl,
+      annotate: browserAnnotate,
     },
     security: {
       configureSession: configureSessionSecurity,
